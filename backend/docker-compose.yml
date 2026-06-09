@@ -1,0 +1,77 @@
+# ============================================================
+# Smart Control Security - Stack de desarrollo local
+#
+# Uso:
+#   docker-compose up               # levanta todo
+#   docker-compose up -d            # en background
+#   docker-compose down             # detiene y borra contenedores
+#   docker-compose down -v          # incluye volúmenes (BORRA datos)
+#   docker-compose logs -f backend  # logs en vivo del backend
+# ============================================================
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: scs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scs_user
+      POSTGRES_PASSWORD: scs_password
+      POSTGRES_DB: scs_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Scripts de bootstrap (extensiones de Postgres) — solo se ejecutan
+      # la primera vez que se crea el volumen. Ver backend/database/init/README.md
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scs_user -d scs_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: scs-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scs-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: local
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://scs_user:scs_password@postgres:5432/scs_db
+      REDIS_URL: redis://redis:6379/0
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live-reload del código durante desarrollo
+      - ./app:/app/app:ro
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
+    name: scs_postgres_data
+  redis_data:
+    name: scs_redis_data

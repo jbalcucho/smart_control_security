@@ -1,0 +1,8 @@
+// Feature: autenticación. Login, refresh token, logout, cambio password.
+// Se implementa en Sprint 2.2.
+//
+// Estructura por feature (Clean Architecture):
+//   features/auth/
+//     ├── data/         # Repositories, datasources
+//     ├── domain/       # Entities, use cases
+//     └── presentation/ # Pages, widgets, providers

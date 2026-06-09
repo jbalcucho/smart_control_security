@@ -1,0 +1,7 @@
+// Componentes React reutilizables. Se llenarán en Fase 5.
+// Estructura sugerida:
+//   components/
+//     ├── ui/           # Primitivas (Button, Input, Card) - estilo shadcn/ui
+//     ├── layout/       # Sidebar, Topbar, Footer
+//     ├── tables/       # DataTable, columns
+//     └── charts/       # Gráficos con Recharts

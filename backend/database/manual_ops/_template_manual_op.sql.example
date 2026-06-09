@@ -1,0 +1,47 @@
+-- ============================================================
+-- Operación manual: <nombre_breve>
+-- ============================================================
+-- Autor:       <Nombre> (@<github_handle>)
+-- Fecha:       YYYY-MM-DD
+-- Ticket:      <SCS-XXX o link al issue>
+-- Ambiente:    <staging | production | ambos>
+--
+-- Justificación:
+--   <Por qué es necesaria esta operación. Qué problema resuelve.
+--    Por qué no puede ser una migración Alembic normal.>
+--
+-- Filas afectadas estimadas: <N>
+-- Tiempo estimado:           <duración>
+-- Riesgo:                    <bajo | medio | alto>
+--
+-- Plan de rollback:
+--   <SQL para revertir el cambio si algo sale mal.
+--    Si no es reversible, explica por qué.>
+--
+-- Validación pre-ejecución:
+--   <Query SELECT que confirma el estado actual antes de correr>
+--
+-- Validación post-ejecución:
+--   <Query SELECT con el resultado esperado>
+-- ============================================================
+
+BEGIN;
+
+-- TODO: Tu SQL aquí
+-- Ejemplo:
+-- UPDATE tabla SET columna = valor WHERE condicion;
+
+-- Validación interna antes del commit
+DO $$
+DECLARE
+    -- Declarar variables de control
+    invalidos int;
+BEGIN
+    -- Verificar que el cambio dejó datos en estado válido
+    SELECT COUNT(*) INTO invalidos FROM tabla WHERE NOT condicion_esperada;
+    IF invalidos > 0 THEN
+        RAISE EXCEPTION 'Validación falló: % filas en estado inesperado', invalidos;
+    END IF;
+END $$;
+
+COMMIT;

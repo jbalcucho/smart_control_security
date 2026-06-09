@@ -1,0 +1,117 @@
+# ============================================================
+# Smart Control Security - Backend
+# Configuración centralizada de herramientas de desarrollo
+# ============================================================
+
+[project]
+name = "smart-control-security-backend"
+version = "0.1.0"
+description = "Sistema de control de asistencia para guardias de seguridad - Backend FastAPI"
+requires-python = ">=3.11"
+readme = "README.md"
+
+# ============================================================
+# Ruff: linter + formateador (reemplaza a black, isort, flake8)
+# ============================================================
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "database/migrations/versions",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "S",   # flake8-bandit (seguridad)
+    "T20", # flake8-print (no prints en producción)
+    "ASYNC", # async best practices
+    "RUF", # ruff-specific rules
+]
+ignore = [
+    "E501",  # line too long (lo maneja el formatter)
+    "B008",  # function call in default argument (FastAPI usa Depends)
+    "S101",  # assert usado (necesario en tests)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = ["S101", "S105", "S106"]              # asserts y passwords hardcoded ok en tests
+"database/migrations/**/*" = ["E", "W", "F", "I"]    # migraciones auto-generadas por Alembic
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+# ============================================================
+# MyPy: type checker estático
+# ============================================================
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+plugins = ["pydantic.mypy"]
+exclude = [
+    "database/migrations/versions/",
+    "build/",
+    "dist/",
+    ".venv/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "boto3.*",
+    "botocore.*",
+    "sendgrid.*",
+    "firebase_admin.*",
+    "geoalchemy2.*",
+]
+ignore_missing_imports = true
+
+# ============================================================
+# Pytest
+# ============================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration (deselect with '-m \"not integration\"')",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/tests/*",
+    "*/database/migrations/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

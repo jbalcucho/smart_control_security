@@ -1,0 +1,227 @@
+name: Database — Auto Migrate
+
+# ============================================================
+# Aplica automáticamente migraciones Alembic + vistas + analytics
+# + seeds al hacer push a main.
+#
+# Operaciones idempotentes y seguras (no destructivas).
+# Para operaciones destructivas ver: database-manual-ops.yml
+# ============================================================
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/database/migrations/**"
+      - "backend/database/views/**"
+      - "backend/database/analytics/**"
+      - "backend/database/seeds/**"
+      - "backend/alembic.ini"
+      - ".github/workflows/database-auto-migrate.yml"
+  # Trigger manual para re-aplicar en caso de fallo
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Ambiente target"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  # ========================================================
+  # 1) Validación previa (siempre corre)
+  # ========================================================
+  validate:
+    name: Validate SQL files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Alembic
+        run: pip install alembic sqlalchemy "sqlalchemy[asyncio]" asyncpg pydantic pydantic-settings structlog
+
+      - name: Verificar que las migraciones forman una cadena válida
+        env:
+          DATABASE_URL: postgresql+asyncpg://dummy:dummy@localhost:5432/dummy
+        run: |
+          # Alembic puede validar offline sin BD real
+          alembic history --verbose || echo "Sin migraciones aún (esperado en Sprint 1.1)"
+
+      - name: Lint de archivos SQL (sintaxis básica)
+        run: |
+          # Verificar que cada archivo .sql sea no-vacío y tenga ; al final
+          find database/views database/analytics database/seeds -name "*.sql" 2>/dev/null | while read f; do
+            if [ ! -s "$f" ]; then
+              echo "ERROR: $f está vacío"; exit 1
+            fi
+            if ! grep -q ";" "$f"; then
+              echo "ERROR: $f no tiene punto y coma"; exit 1
+            fi
+            echo "OK: $f"
+          done
+
+  # ========================================================
+  # 2) Aplicar en STAGING (auto en cada push a main)
+  # ========================================================
+  apply-staging:
+    name: Apply to Staging
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    environment:
+      name: staging-database
+      # Configurar en GitHub: Settings → Environments → staging-database
+      # Requerir 0 reviewers (auto), agregar secrets DATABASE_URL_STAGING
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install psql client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y postgresql-client
+
+      - name: Apply Alembic migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+        run: |
+          echo "→ Aplicando migraciones Alembic..."
+          alembic upgrade head
+          echo "→ Versión actual:"
+          alembic current
+
+      - name: Apply views/
+        env:
+          PGCONNECTION: ${{ secrets.PGCONNECTION_STAGING }}
+        run: |
+          if [ -d database/views ] && [ "$(ls -A database/views/*.sql 2>/dev/null)" ]; then
+            for f in $(ls database/views/*.sql | sort); do
+              echo "→ Aplicando $f..."
+              psql "$PGCONNECTION" -v ON_ERROR_STOP=1 -f "$f"
+            done
+          else
+            echo "Sin vistas que aplicar"
+          fi
+
+      - name: Apply analytics/ (materialized views)
+        env:
+          PGCONNECTION: ${{ secrets.PGCONNECTION_STAGING }}
+        run: |
+          if [ -d database/analytics ] && [ "$(ls -A database/analytics/*.sql 2>/dev/null)" ]; then
+            for f in $(ls database/analytics/*.sql | sort); do
+              echo "→ Aplicando $f..."
+              psql "$PGCONNECTION" -v ON_ERROR_STOP=1 -f "$f"
+            done
+          else
+            echo "Sin materialized views que aplicar"
+          fi
+
+      - name: Apply seeds/
+        env:
+          PGCONNECTION: ${{ secrets.PGCONNECTION_STAGING }}
+        run: |
+          if [ -d database/seeds ] && [ "$(ls -A database/seeds/*.sql 2>/dev/null)" ]; then
+            for f in $(ls database/seeds/*.sql | sort); do
+              echo "→ Aplicando $f..."
+              psql "$PGCONNECTION" -v ON_ERROR_STOP=1 -f "$f"
+            done
+          else
+            echo "Sin seeds que aplicar"
+          fi
+
+      - name: Resumen
+        run: echo "Database staging actualizada exitosamente"
+
+  # ========================================================
+  # 3) Aplicar en PRODUCTION (requiere approval)
+  # ========================================================
+  apply-production:
+    name: Apply to Production
+    runs-on: ubuntu-latest
+    needs: apply-staging
+    # Solo desde main, no desde workflow_dispatch a staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production-database
+      # Configurar en GitHub: Settings → Environments → production-database
+      # Required reviewers: 2 (mínimo)
+      # Agregar secrets DATABASE_URL_PRODUCTION + PGCONNECTION_PRODUCTION
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install psql client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y postgresql-client
+
+      - name: Backup pre-deploy (snapshot del schema)
+        env:
+          PGCONNECTION: ${{ secrets.PGCONNECTION_PRODUCTION }}
+        run: |
+          pg_dump --schema-only --no-owner --no-privileges "$PGCONNECTION" > /tmp/schema-pre-deploy.sql
+          echo "Backup de schema guardado: $(wc -l < /tmp/schema-pre-deploy.sql) líneas"
+
+      - name: Upload schema backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-pre-deploy-${{ github.sha }}
+          path: /tmp/schema-pre-deploy.sql
+          retention-days: 90
+
+      - name: Apply Alembic migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
+        run: |
+          alembic upgrade head
+          alembic current
+
+      - name: Apply views/ analytics/ seeds/
+        env:
+          PGCONNECTION: ${{ secrets.PGCONNECTION_PRODUCTION }}
+        run: |
+          for dir in views analytics seeds; do
+            if [ -d "database/$dir" ] && [ "$(ls -A database/$dir/*.sql 2>/dev/null)" ]; then
+              for f in $(ls database/$dir/*.sql | sort); do
+                echo "→ Aplicando $f..."
+                psql "$PGCONNECTION" -v ON_ERROR_STOP=1 -f "$f"
+              done
+            fi
+          done
+
+      - name: Resumen
+        run: echo "Database production actualizada. Backup guardado como artifact."

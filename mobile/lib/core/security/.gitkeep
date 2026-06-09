@@ -1,0 +1,2 @@
+// Carpeta reservada para HMAC signing, KeyStore, integrity checks,
+// detección de root/emulador. Se implementa en Sprint 2.6.

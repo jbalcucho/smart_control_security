@@ -1,0 +1,25 @@
+# No copiar al build de Docker
+.git
+.gitignore
+.env
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+build
+dist
+tests
+docs
+README.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+.github

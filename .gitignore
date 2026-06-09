@@ -1,0 +1,220 @@
+# ============================================================
+# Smart Control Security — .gitignore
+# Cubre: Python, Flutter, Node (panel admin futuro), Docker,
+#        IDEs, secretos, archivos del sistema operativo.
+# ============================================================
+
+# -----------------------------
+# Secretos y entornos
+# -----------------------------
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+*.keystore
+*.jks
+service-account*.json
+firebase-adminsdk*.json
+google-services.json
+
+# -----------------------------
+# Python / Backend FastAPI
+# -----------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.virtualenv/
+pip-log.txt
+pip-delete-this-directory.txt
+.installed.cfg
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+develop-eggs/
+downloads/
+eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+MANIFEST
+
+# Testing y cobertura
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+.hypothesis/
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Alembic (mantener migraciones versionadas, ignorar caches)
+**/alembic/__pycache__/
+**/database/migrations/__pycache__/
+
+# Database explore/ — sandbox local, no se versiona (excepto README)
+backend/database/explore/*
+!backend/database/explore/README.md
+!backend/database/explore/.gitkeep
+
+# -----------------------------
+# Flutter / Mobile
+# -----------------------------
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/.pub-cache/
+mobile/.pub/
+mobile/build/
+mobile/.gradle/
+mobile/local.properties
+mobile/.idea/
+mobile/*.iml
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/captures/
+mobile/android/key.properties
+mobile/android/app/release/
+mobile/android/app/debug/
+mobile/android/app/profile/
+mobile/android/.cxx/
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/App.framework
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/Flutter.podspec
+mobile/ios/Flutter/Generated.xcconfig
+mobile/ios/Flutter/ephemeral/
+mobile/ios/Flutter/app.flx
+mobile/ios/Flutter/app.zip
+mobile/ios/Flutter/flutter_assets/
+mobile/ios/Flutter/flutter_export_environment.sh
+mobile/ios/ServiceDefinitions.json
+mobile/ios/Runner/GeneratedPluginRegistrant.*
+mobile/ios/build/
+
+# Coverage Flutter
+mobile/coverage/
+
+# Símbolos de debug (Flutter obfuscation)
+mobile/build/symbols/
+mobile/symbols/
+
+# -----------------------------
+# Node / Panel Admin Web (futuro)
+# -----------------------------
+admin-web/node_modules/
+admin-web/.next/
+admin-web/.turbo/
+admin-web/out/
+admin-web/.vercel/
+admin-web/dist/
+admin-web/coverage/
+admin-web/npm-debug.log*
+admin-web/yarn-debug.log*
+admin-web/yarn-error.log*
+admin-web/.pnpm-store/
+
+# -----------------------------
+# Docker
+# -----------------------------
+.docker/
+docker-compose.override.yml
+*.pid
+
+# -----------------------------
+# IDEs y editores
+# -----------------------------
+.vscode/
+!.vscode/settings.example.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -----------------------------
+# Cursor
+# -----------------------------
+.cursor/
+
+# -----------------------------
+# Sistema operativo
+# -----------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# -----------------------------
+# Logs
+# -----------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -----------------------------
+# Bases de datos locales y backups
+# -----------------------------
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sql.gz
+postgres-data/
+redis-data/
+
+# -----------------------------
+# Archivos de carga subidos (local dev)
+# -----------------------------
+uploads/
+tmp/
+temp/
+
+# -----------------------------
+# Reportes generados
+# -----------------------------
+reportes/
+*.xlsx
+!docs/**/*.xlsx
+!**/templates/*.xlsx

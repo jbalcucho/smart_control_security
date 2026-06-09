@@ -1,0 +1,28 @@
+-- ============================================================
+-- Seed: <nombre del catálogo>
+-- Descripción: <qué datos popula y para qué módulo>
+-- Autor: <nombre>  Fecha: YYYY-MM-DD
+-- ============================================================
+-- IMPORTANTE: SIEMPRE usar ON CONFLICT para idempotencia.
+-- Este archivo se ejecuta automáticamente en cada deploy.
+-- ============================================================
+
+-- Roles del sistema
+INSERT INTO roles (codigo, nombre, descripcion)
+VALUES
+    ('admin',      'Administrador',          'Acceso total al sistema y panel web'),
+    ('supervisor', 'Supervisor de Guardias', 'Ve y aprueba marcas, gestiona alertas'),
+    ('guardia',   'Guardia',                'Usa la app móvil para marcar asistencia'),
+    ('auditor',    'Auditor',                'Solo lectura de reportes y logs')
+ON CONFLICT (codigo) DO UPDATE SET
+    nombre = EXCLUDED.nombre,
+    descripcion = EXCLUDED.descripcion;
+
+-- Tipos de alerta predefinidos
+INSERT INTO tipos_alerta (codigo, nombre, severidad)
+VALUES
+    ('GPS_SPOOFING',     'GPS Falso detectado',          'alta'),
+    ('LIVENESS_FAIL',    'Falla en prueba de vida',      'alta'),
+    ('FUERA_GEOFENCE',   'Marca fuera de la zona',       'media'),
+    ('DEVICE_NUEVO',     'Marcaje desde dispositivo nuevo', 'baja')
+ON CONFLICT (codigo) DO NOTHING;

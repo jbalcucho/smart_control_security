@@ -1,0 +1,3 @@
+# Placeholder. Servicios cross-cutting (S3Service, RekognitionService,
+# SendGridService, FCMService, PlayIntegrityService, GeofenceService)
+# se implementan progresivamente en Sprints 1.5, 3.x, 4.x.

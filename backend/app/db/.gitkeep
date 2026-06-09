@@ -1,0 +1,2 @@
+# Placeholder. La capa de persistencia (SQLAlchemy + sesiones + PostGIS helpers)
+# se implementa en Sprint 1.2.

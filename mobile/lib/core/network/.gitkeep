@@ -1,0 +1,2 @@
+// Carpeta reservada para Dio, interceptors (auth, HMAC, cert pinning).
+// Se implementa en Sprint 2.6.

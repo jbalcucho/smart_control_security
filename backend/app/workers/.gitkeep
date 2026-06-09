@@ -1,0 +1,3 @@
+# Placeholder. Background jobs con Arq (send_email, send_push,
+# generate_report, cleanup_expired_data, process_fraud_alert, etc.)
+# se implementan en Fase 4 (Sprint 4.1).

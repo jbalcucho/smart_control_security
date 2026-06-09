@@ -1,0 +1,103 @@
+name: smart_control_security
+description: "App móvil para guardias de seguridad. Captura de marcas de asistencia con foto, GPS y modo offline-first."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # --- Estado ---
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # --- Modelos inmutables / serialización ---
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # --- HTTP + seguridad de red ---
+  dio: ^5.7.0
+  dio_certificate_pinning: ^6.0.0
+
+  # --- Cámara y GPS ---
+  camera: ^0.11.0+2
+  geolocator: ^13.0.2
+  permission_handler: ^11.3.1
+
+  # --- Liveness on-device ---
+  google_mlkit_face_detection: ^0.12.0
+
+  # --- Almacenamiento ---
+  sqflite: ^2.4.0
+  path_provider: ^2.1.5
+  path: ^1.9.0
+  flutter_secure_storage: ^9.2.2
+
+  # --- Background tasks ---
+  workmanager: ^0.5.2
+  connectivity_plus: ^6.0.5
+
+  # --- Seguridad / Anti-fraude ---
+  flutter_jailbreak_detection: ^1.10.0
+  # play_integrity_flutter: ^x.x.x   # Activar cuando se valide el plugin a usar
+
+  # --- Firebase / Push notifications ---
+  firebase_core: ^3.6.0
+  firebase_messaging: ^15.1.3
+
+  # --- UI utilities ---
+  google_fonts: ^6.2.1
+  intl: ^0.19.0
+
+  # --- Internacionalización ---
+  flutter_native_splash: ^2.4.2
+
+  # --- Utilidades ---
+  uuid: ^4.5.1
+  cupertino_icons: ^1.0.8
+
+  # --- Crypto ---
+  crypto: ^3.0.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+  # --- Linter ---
+  flutter_lints: ^5.0.0
+  very_good_analysis: ^7.0.0
+
+  # --- Code generation ---
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+  riverpod_generator: ^2.6.2
+  custom_lint: ^0.6.7
+  riverpod_lint: ^2.6.2
+
+  # --- Tests ---
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+
+  # Assets (descomentar cuando se agreguen)
+  # assets:
+  #   - assets/images/
+  #   - assets/icons/
+
+  # Fuentes (descomentar cuando se definan)
+  # fonts:
+  #   - family: Inter
+  #     fonts:
+  #       - asset: assets/fonts/Inter-Regular.ttf
+  #       - asset: assets/fonts/Inter-Bold.ttf
+  #         weight: 700

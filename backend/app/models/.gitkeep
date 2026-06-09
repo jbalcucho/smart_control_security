@@ -1,0 +1,3 @@
+# Placeholder. Los modelos SQLAlchemy (User, Empresa, Guardia, Puesto, Turno,
+# Asignacion, Device, Marca, Alerta, RefreshToken, AuditLog, etc.) se crean
+# en Sprint 1.2 según docs/modelo-datos.md.

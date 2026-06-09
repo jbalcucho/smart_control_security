@@ -1,0 +1,22 @@
+-- ============================================================
+-- Vista: v_<nombre>
+-- Descripción: <qué expone esta vista y para quién>
+-- Dependencias: <tablas / otras vistas>
+-- Autor: <nombre>  Fecha: YYYY-MM-DD
+-- ============================================================
+-- IMPORTANTE: SIEMPRE usar CREATE OR REPLACE VIEW para idempotencia.
+-- Este archivo se ejecuta automáticamente en cada deploy.
+-- ============================================================
+
+CREATE OR REPLACE VIEW v_ejemplo AS
+SELECT
+    u.id              AS user_id,
+    u.email,
+    g.nombre_completo AS guardia_nombre,
+    g.activo
+FROM users u
+JOIN guardias g ON g.user_id = u.id
+WHERE u.deleted_at IS NULL;
+
+COMMENT ON VIEW v_ejemplo IS
+'Vista de usuarios activos con su información de guardia. Usada por el panel admin en /usuarios.';

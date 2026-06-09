@@ -1,0 +1,178 @@
+name: Database — Manual Operations
+
+# ============================================================
+# Ejecuta scripts SQL DESTRUCTIVOS o SENSIBLES de manual_ops/
+# bajo aprobación humana explícita.
+#
+# Cuándo usar este workflow:
+#   - UPDATEs masivos
+#   - DELETEs / TRUNCATEs
+#   - DROPs de columnas/tablas
+#   - Backfills lentos
+#   - Fixes de incidente
+#
+# Cuándo NO usar este workflow:
+#   - Migraciones Alembic → database-auto-migrate.yml las aplica solas
+#   - Vistas idempotentes → database-auto-migrate.yml también
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      script_name:
+        description: "Nombre del archivo en manual_ops/ (sin path, ej: 2026-06-09_backfill.sql)"
+        required: true
+        type: string
+
+      environment:
+        description: "Ambiente target"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+
+      dry_run:
+        description: "Dry run (EXPLAIN sin ejecutar)"
+        required: true
+        type: boolean
+        default: true
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  # ========================================================
+  # 1) Pre-validación (no requiere approval)
+  # ========================================================
+  validate:
+    name: Pre-validate script
+    runs-on: ubuntu-latest
+    outputs:
+      script_path: ${{ steps.check.outputs.script_path }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar que el archivo existe
+        id: check
+        run: |
+          SCRIPT="database/manual_ops/${{ inputs.script_name }}"
+          if [ ! -f "$SCRIPT" ]; then
+            echo "ERROR: archivo $SCRIPT no encontrado"
+            echo "Archivos disponibles en manual_ops/:"
+            ls -la database/manual_ops/ || echo "(directorio vacío)"
+            exit 1
+          fi
+          echo "Script encontrado: $SCRIPT"
+          echo "script_path=$SCRIPT" >> "$GITHUB_OUTPUT"
+
+      - name: Verificar cabecera mínima del script
+        run: |
+          SCRIPT="database/manual_ops/${{ inputs.script_name }}"
+          # La cabecera obligatoria debe contener al menos: Autor, Ticket, Plan de rollback
+          REQUIRED=("Autor" "Ticket" "rollback")
+          for kw in "${REQUIRED[@]}"; do
+            if ! grep -qi "$kw" "$SCRIPT"; then
+              echo "ERROR: $SCRIPT no contiene '$kw' en su cabecera"
+              echo "Ver plantilla en database/manual_ops/_template_manual_op.sql.example"
+              exit 1
+            fi
+          done
+          echo "Cabecera del script válida"
+
+      - name: Mostrar contenido del script (para auditoría)
+        run: |
+          echo "============================================"
+          echo "Contenido del script que se ejecutará:"
+          echo "============================================"
+          cat "database/manual_ops/${{ inputs.script_name }}"
+
+  # ========================================================
+  # 2) Ejecutar con aprobación de GitHub Environment
+  # ========================================================
+  execute:
+    name: Execute on ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: validate
+    environment:
+      # GitHub Settings → Environments:
+      # - manual-ops-staging:    1 reviewer required
+      # - manual-ops-production: 2 reviewers required + deployment branch rules
+      name: manual-ops-${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y postgresql-client
+
+      - name: Backup pre-ejecución (production only)
+        if: inputs.environment == 'production' && inputs.dry_run == false
+        env:
+          PGCONNECTION: ${{ secrets.PGCONNECTION_PRODUCTION }}
+        run: |
+          # Snapshot del schema antes del cambio
+          pg_dump --schema-only --no-owner --no-privileges "$PGCONNECTION" > /tmp/schema-before.sql
+          echo "Backup de schema: $(wc -l < /tmp/schema-before.sql) líneas"
+
+      - name: Upload backup
+        if: inputs.environment == 'production' && inputs.dry_run == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-before-${{ inputs.script_name }}-${{ github.run_id }}
+          path: /tmp/schema-before.sql
+          retention-days: 365
+
+      - name: Ejecutar script
+        env:
+          PGCONNECTION: ${{
+            inputs.environment == 'production'
+              && secrets.PGCONNECTION_PRODUCTION
+              || secrets.PGCONNECTION_STAGING
+          }}
+        run: |
+          SCRIPT="database/manual_ops/${{ inputs.script_name }}"
+          OUTPUT="/tmp/manual_op_output.log"
+
+          echo "============================================"
+          echo "Ambiente:  ${{ inputs.environment }}"
+          echo "Script:    $SCRIPT"
+          echo "Dry-run:   ${{ inputs.dry_run }}"
+          echo "Trigger:   ${{ github.actor }}"
+          echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "============================================"
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "MODO DRY-RUN: envolviendo en transacción que se hace ROLLBACK"
+            # Envolvemos en BEGIN/ROLLBACK para no commitear
+            {
+              echo "BEGIN;"
+              cat "$SCRIPT"
+              echo ""
+              echo "ROLLBACK;"
+            } | psql "$PGCONNECTION" -v ON_ERROR_STOP=1 2>&1 | tee "$OUTPUT"
+          else
+            echo "MODO REAL: el script se ejecutará como está (debe traer su BEGIN/COMMIT)"
+            psql "$PGCONNECTION" -v ON_ERROR_STOP=1 -f "$SCRIPT" 2>&1 | tee "$OUTPUT"
+          fi
+
+      - name: Upload output como auditoría
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-op-${{ inputs.script_name }}-${{ github.run_id }}
+          path: /tmp/manual_op_output.log
+          retention-days: 365
+
+      - name: Resumen
+        run: |
+          echo "✅ Operación manual completada"
+          echo "Output guardado como artifact para auditoría histórica (365 días)"
+          if [ "${{ inputs.dry_run }}" = "false" ]; then
+            echo ""
+            echo "⚠️  RECUERDA: renombrar el script en una PR posterior"
+            echo "    ${{ inputs.script_name }} → ${{ inputs.script_name }%.sql}_DONE.sql"
+          fi

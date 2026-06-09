@@ -1,0 +1,35 @@
+-- ============================================================
+-- Materialized View: mv_<nombre>
+-- Descripción: <qué precomputa esta vista>
+-- Refresh: <cada cuánto, cron en Arq que la refresca>
+-- Tamaño estimado: <filas y bytes esperados>
+-- Autor: <nombre>  Fecha: YYYY-MM-DD
+-- ============================================================
+-- IMPORTANTE: Patrón DROP+CREATE para idempotencia en deploys.
+-- Este archivo se ejecuta automáticamente en cada deploy.
+-- El refresh periódico lo hace un worker de Arq.
+-- ============================================================
+
+DROP MATERIALIZED VIEW IF EXISTS mv_ejemplo CASCADE;
+
+CREATE MATERIALIZED VIEW mv_ejemplo AS
+SELECT
+    date_trunc('day', m.timestamp_servidor)::date AS dia,
+    m.puesto_id,
+    COUNT(*)                                      AS total_marcas,
+    COUNT(*) FILTER (WHERE m.es_fraude)           AS total_fraudes,
+    AVG(m.tiempo_respuesta_ms)::int               AS tiempo_promedio_ms
+FROM marcas m
+WHERE m.timestamp_servidor >= NOW() - INTERVAL '90 days'
+GROUP BY 1, 2;
+
+-- Índice único requerido para REFRESH MATERIALIZED VIEW CONCURRENTLY
+CREATE UNIQUE INDEX IF NOT EXISTS ix_mv_ejemplo_pk
+    ON mv_ejemplo (dia, puesto_id);
+
+-- Índice de soporte para consultas frecuentes
+CREATE INDEX IF NOT EXISTS ix_mv_ejemplo_puesto
+    ON mv_ejemplo (puesto_id, dia DESC);
+
+COMMENT ON MATERIALIZED VIEW mv_ejemplo IS
+'Marcas agregadas por día y puesto en los últimos 90 días. Refresh cada 1h vía Arq.';
