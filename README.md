@@ -2,7 +2,7 @@
 
 Sistema de control de asistencia empresarial para guardias de seguridad, **offline-first** y con estrictas medidas **anti-fraude** (suplantación de identidad, fotos de galería, GPS falso).
 
-> **Estado actual:** 🏗️ Fase 1, Sprint 1.1 completado. Scaffolds de los 3 componentes (backend, mobile, admin-web) listos en `main` para desarrollo paralelo por múltiples devs.
+> **Estado actual:** 🏗️ Fase 1, Sprint 1.1 completado. Scaffolds de los 3 componentes (backend, mobile, admin-web) + 1 demo web para cliente listos en `main` para desarrollo paralelo.
 
 ---
 
@@ -34,6 +34,7 @@ Toda la documentación viva del proyecto está en [`docs/`](./docs/). Lee en est
 | 7 | [`docs/seguridad.md`](./docs/seguridad.md) | Modelo de amenazas, defensa en profundidad, cumplimiento legal |
 | 8 | [`docs/roadmap-fases.md`](./docs/roadmap-fases.md) | Plan de fases con tareas detalladas y criterios de aceptación |
 | 9 | [`docs/decisiones-tecnicas.md`](./docs/decisiones-tecnicas.md) | ADRs — registro de decisiones arquitectónicas tomadas |
+| 10 | [`docs/demo-web-plan.md`](./docs/demo-web-plan.md) | Plan del **demo web** para presentar al cliente antes de la app nativa |
 
 ### Documentos originales de contexto (briefs iniciales)
 
@@ -84,12 +85,25 @@ smart_control_security/
 │   ├── tailwind.config.ts
 │   └── README.md             # Cómo correr el panel web
 │
+├── demo-web/                 # 🎬 DEMO web mobile-first para cliente
+│   ├── prisma/               # Schema Prisma + seed (3 usuarios, 2 puestos)
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── (guardia)/    # Vista mobile del guardia
+│   │   │   ├── (supervisor)/ # Vista desktop del supervisor
+│   │   │   └── api/          # API routes
+│   │   ├── components/
+│   │   └── lib/              # auth, prisma, s3, geofence
+│   ├── package.json
+│   └── README.md             # Setup completo (Neon + S3 + Vercel)
+│
 ├── docs/                     # Documentación viva (ver índice arriba)
 ├── .github/
-│   ├── workflows/            # CI para los 3 componentes + 2 de BD
+│   ├── workflows/            # CI para los 4 componentes + 2 de BD
 │   │   ├── backend-ci.yml
 │   │   ├── mobile-ci.yml
 │   │   ├── admin-web-ci.yml
+│   │   ├── demo-web-ci.yml
 │   │   ├── database-auto-migrate.yml      # 🤖 Aplica migraciones + vistas + seeds
 │   │   └── database-manual-ops.yml        # 👤 Ejecuta scripts destructivos con aprobación
 │   ├── ISSUE_TEMPLATE/
@@ -144,6 +158,24 @@ npm run dev
 
 → Detalle completo en [`admin-web/README.md`](./admin-web/README.md).
 
+### 🎬 Demo Web (Next.js + Vercel + Neon Postgres) — para presentar al cliente
+
+```bash
+cd demo-web
+npm install
+copy .env.example .env
+# Editar .env con credenciales de Neon + AWS S3
+npx prisma migrate dev --name init
+npx prisma db seed
+npm run dev
+# Abrir: http://localhost:3000
+```
+
+> Pensado para mostrar al cliente el flujo de la app móvil mientras se construye la app nativa real.
+> Usuarios precargados: `guardia1@demo.com`, `guardia2@demo.com`, `supervisor@demo.com` (password: `demo1234`).
+
+→ Detalle completo en [`demo-web/README.md`](./demo-web/README.md) y [plan completo](./docs/demo-web-plan.md).
+
 ---
 
 ## 🧩 Stack tecnológico (resumen)
@@ -185,6 +217,7 @@ Ver detalles completos en [`docs/seguridad.md`](./docs/seguridad.md).
 |---|---|---|
 | Fase 0 — Setup inicial | ✅ Completada | Docs + estructura del monorepo + .gitignore + CONTRIBUTING |
 | **Fase 1, Sprint 1.1** | ✅ Completada | Scaffold backend (FastAPI + logging + CI) |
+| **Demo Web** | 🚀 En progreso | Scaffold listo, sprints Demo 0-5 (1-2 sem) — ver [`docs/demo-web-plan.md`](./docs/demo-web-plan.md) |
 | Fase 1, Sprint 1.2 | ⏳ Siguiente | Persistencia (SQLAlchemy + Alembic + modelos) |
 | Fase 1, Sprint 1.3–1.6 | ⏳ Pendiente | Auth, CRUDs, S3, Rekognition stubs |
 | Fase 2 — App móvil completa | ⏳ Scaffold listo | Solo falta `flutter create .` y empezar a implementar features |

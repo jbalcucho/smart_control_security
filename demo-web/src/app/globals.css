@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+/* ============================================================
+ * Tailwind CSS 4 — Configuración del tema
+ *
+ * En Tailwind 4 la config vive en CSS, no en tailwind.config.ts.
+ * Definimos aquí: colores, fuentes, breakpoints y animaciones.
+ * ============================================================ */
+
+@theme {
+  /* ----- Paleta primary (azul corporativo de seguridad) ----- */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+
+  /* ----- Paleta success (verde) ----- */
+  --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+
+  /* ----- Paleta warning (ámbar) ----- */
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+
+  /* ----- Paleta danger (rojo) ----- */
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-200: #fecaca;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+
+  /* ----- Fuente principal ----- */
+  --font-sans: var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  /* ----- Breakpoint extra para móviles pequeños ----- */
+  --breakpoint-xs: 375px;
+
+  /* ----- Animaciones personalizadas ----- */
+  --animate-fade-in: fadeIn 0.3s ease-in-out;
+  --animate-slide-up: slideUp 0.4s ease-out;
+}
+
+/* Keyframes referenciados por las animaciones del @theme */
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  0% {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ============================================================
+ * Base — estilos globales
+ * ============================================================ */
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: #f9fafb;
+    color: #111827;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Mobile: evita el zoom automático del browser al hacer focus en inputs */
+  @media (max-width: 768px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+}
+
+/* ============================================================
+ * Components — clases reutilizables
+ * ============================================================ */
+
+@layer components {
+  /* Container mobile-first (max 480px en mobile) */
+  .container-mobile {
+    @apply mx-auto w-full max-w-[480px] px-4;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg bg-primary-600 px-4 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-primary-700 active:bg-primary-800 disabled:cursor-not-allowed disabled:bg-gray-400;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-lg bg-white px-4 py-3 font-semibold text-gray-900 ring-1 ring-gray-300 transition-colors hover:bg-gray-50 active:bg-gray-100;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center rounded-lg bg-danger-600 px-4 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-danger-700;
+  }
+
+  .card {
+    @apply rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100;
+  }
+}

@@ -1,0 +1,175 @@
+// ============================================================
+// Smart Control Security — Demo Web
+// Schema Prisma para el demo (subset del modelo de producción)
+//
+// Modelo de producción completo: ../../docs/modelo-datos.md
+// ============================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum Role {
+  GUARDIA
+  SUPERVISOR
+  ADMIN
+}
+
+enum TipoMarca {
+  ENTRADA
+  SALIDA
+}
+
+enum TipoAlerta {
+  FUERA_GEOFENCE
+  FOTO_INVALIDA
+  HORARIO_FUERA_TURNO
+  GPS_IMPRECISO
+}
+
+enum Severidad {
+  BAJA
+  MEDIA
+  ALTA
+}
+
+// ============================================================
+// User — guardias, supervisores y admins
+// ============================================================
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  password     String   // hash bcrypt
+  nombre       String
+  rol          Role     @default(GUARDIA)
+
+  // Solo aplica si rol = GUARDIA: a qué puesto está asignado
+  puestoId     String?
+  puesto       Puesto?  @relation(fields: [puestoId], references: [id], onDelete: SetNull)
+
+  // Turno (solo para guardias). En el demo lo hardcodeamos como string simple.
+  // En producción esto será una entidad Turno separada.
+  turnoNombre  String?  // ej: "Mañana 6:00-14:00"
+  turnoInicio  String?  // ej: "06:00"
+  turnoFin     String?  // ej: "14:00"
+
+  activo       Boolean  @default(true)
+  ultimoLogin  DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  marcas       Marca[]
+
+  @@index([rol])
+  @@index([puestoId])
+}
+
+// ============================================================
+// Puesto — ubicación física donde el guardia debe estar
+// ============================================================
+
+model Puesto {
+  id             String   @id @default(cuid())
+  nombre         String   // "Sede Norte"
+  direccion      String   // dirección legible
+  latitud        Float    // coordenada del centro del puesto
+  longitud       Float
+
+  // Radio en metros para el geofence. Default 100m.
+  radioGeofenceM Int      @default(100)
+
+  activo         Boolean  @default(true)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  guardias       User[]
+  marcas         Marca[]
+
+  @@index([activo])
+}
+
+// ============================================================
+// Marca — registro de una marcación de entrada o salida
+// ============================================================
+
+model Marca {
+  id                  String       @id @default(cuid())
+
+  userId              String
+  user                User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  puestoId            String
+  puesto              Puesto       @relation(fields: [puestoId], references: [id], onDelete: Restrict)
+
+  tipo                TipoMarca
+
+  // Foto subida a S3 (URL pública). Después del demo se hace privado + presigned URLs.
+  fotoUrl             String
+  fotoKey             String       // key en S3 (para borrarlo si se necesita)
+
+  // GPS capturado al momento de la marca
+  latitud             Float
+  longitud            Float
+  precisionM          Float        // exactitud del GPS reportada por el browser
+
+  // Validación de geofence (calculada en el servidor al insertar)
+  distanciaPuestoM    Float        // metros al centro del puesto
+  dentroDelGeofence   Boolean
+
+  // Fraude (puede ser true por geofence, foto inválida, etc.)
+  esFraude            Boolean      @default(false)
+  motivoFraude        String?
+
+  // Timestamps duales (cliente vs servidor) — el servidor es la verdad
+  timestampCliente    DateTime     // del navegador del guardia
+  timestampServidor   DateTime     @default(now())
+
+  // Metadatos del browser (user agent, etc.) — útil para auditoría
+  userAgent           String?
+
+  alerta              Alerta?
+
+  @@index([userId, timestampServidor(sort: Desc)])
+  @@index([puestoId, timestampServidor(sort: Desc)])
+  @@index([esFraude, timestampServidor(sort: Desc)])
+}
+
+// ============================================================
+// Alerta — generada automáticamente cuando una marca es sospechosa
+// ============================================================
+
+model Alerta {
+  id          String      @id @default(cuid())
+
+  marcaId     String      @unique
+  marca       Marca       @relation(fields: [marcaId], references: [id], onDelete: Cascade)
+
+  tipo        TipoAlerta
+  severidad   Severidad
+  mensaje     String      // descripción humana del problema
+
+  // Workflow básico
+  resuelta    Boolean     @default(false)
+  resueltaPor String?     // userId del supervisor que la resolvió
+  resueltaEn  DateTime?
+  notas       String?
+
+  createdAt   DateTime    @default(now())
+
+  @@index([resuelta, severidad, createdAt(sort: Desc)])
+  @@index([tipo])
+}

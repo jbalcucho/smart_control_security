@@ -30,6 +30,7 @@
 | [ADR-018](#adr-018-stack-del-panel-admin-web) | Stack del panel admin web (Next.js 15 + Tailwind) | ✅ Aceptado | 2026-06 |
 | [ADR-019](#adr-019-conventional-commits--trunk-based-development) | Conventional Commits + trunk-based development | ✅ Aceptado | 2026-06 |
 | [ADR-020](#adr-020-estructura-híbrida-de-databasealembic--vistas--seeds--manual_ops) | Estructura híbrida de `database/` (Alembic + vistas + seeds + manual_ops) | ✅ Aceptado | 2026-06 |
+| [ADR-021](#adr-021-demo-web-previo-a-la-app-nativa) | Demo web previo a la app nativa (Next.js + Vercel + Neon) | ✅ Aceptado | 2026-06 |
 
 ---
 
@@ -725,6 +726,71 @@ backend/database/
 
 ### Notas
 Esta decisión NO reemplaza el ADR-013 (Alembic), lo complementa. Alembic sigue siendo la herramienta de migraciones de schema; los otros directorios son capas adicionales que cubren casos que Alembic no maneja idiomáticamente (vistas idempotentes, seeds idempotentes, scripts manuales auditables).
+
+---
+
+## ADR-021: Demo web previo a la app nativa
+
+**Estado:** ✅ Aceptado
+**Fecha:** 2026-06
+
+### Contexto
+El cliente quiere ver un demo del producto en **1-2 semanas**. La app nativa Android (Fase 2 del roadmap) requiere 8-12 semanas. Necesitamos algo que muestre el valor de la solución sin esperar tanto.
+
+Adicionalmente, tenemos un repo de referencia (`rotatudisfraz`) que ya tiene resuelto el patrón Next.js 15 + AWS S3 + Vercel, lo que acelera el arranque.
+
+### Opciones evaluadas
+
+1. **No hacer demo, esperar la app nativa** — perdemos al cliente o credibilidad
+2. **Demo en Flutter Web** — Flutter Web es inmaduro para producción, peor para demo crítico
+3. **Mockup en Figma navegable** — no es funcional, no muestra el valor real (cámara, GPS, fraude)
+4. **Web responsive (Next.js)** ✅ — funcional, rápido, reusa patrones de `rotatudisfraz`
+5. **Prototipo con Adalo / Bubble** — vendor lock-in + no reusable
+
+### Decisión
+**Demo web responsive con Next.js 15 + Vercel + Neon Postgres + AWS S3.**
+
+Vive en `smart_control_security/demo-web/` dentro del monorepo.
+
+### Justificación
+
+- **Velocidad de armado:** 12-15 días hábiles vs 8-12 semanas de la app nativa
+- **Funcional de verdad:** captura cámara, GPS, sube a S3, valida geofence server-side
+- **Mismo stack que el panel admin futuro:** TypeScript + Next.js + Tailwind + Postgres
+- **Reusable:** las APIs y modelo de datos sirven para la app nativa después
+- **Patrón validado:** `rotatudisfraz` ya tiene S3 + Next.js + Vercel funcionando
+- **Costo cero:** Vercel free + Neon free + S3 centavos/mes
+- **Cliente accede sin instalar nada:** abre URL en celular, listo
+
+### Consecuencias
+
+- ✅ Cliente ve algo tangible en 2 semanas
+- ✅ Validamos UX y flujos antes de invertir en lo nativo
+- ✅ APIs y modelo de datos quedan diseñados para la app nativa
+- ✅ El equipo puede iterar rápido (deploy en 1 click a Vercel)
+- ⚠️ Demo NO tiene capas de seguridad nativas (liveness real, anti-spoofing GPS, device attestation, offline real). Esto se comunica explícitamente al cliente.
+- ⚠️ Web tiene limitaciones de cámara/GPS en interiores (mitigable mostrando precisión)
+- ⚠️ Stack del demo (Prisma + Next.js API routes) **no es** el stack del backend final (FastAPI + SQLAlchemy + Alembic). El demo es desechable como código, pero su modelo de datos es válido.
+
+### Trade-offs explícitos vs producción
+
+| Capa | Demo | Producción |
+|---|---|---|
+| Frontend | Next.js mobile-first web | Flutter Android nativo |
+| Backend | Next.js API routes (Node) | FastAPI (Python) |
+| DB | Neon Postgres + Prisma | Postgres+PostGIS + SQLAlchemy + Alembic |
+| Storage | AWS S3 directo | AWS S3 con SSE-KMS + presigned URLs |
+| Auth | NextAuth credentials mock | JWT + refresh + device binding + HMAC |
+| Liveness | NO (solo captura selfie) | AWS Rekognition Face Liveness real |
+| GPS | Browser geolocation | Sensores nativos + Play Integrity |
+| Offline | NO | SQLite local + sync workers |
+
+### Documentado en
+- [`docs/demo-web-plan.md`](./demo-web-plan.md) — Plan completo del demo
+- [`demo-web/README.md`](../demo-web/README.md) — Cómo correrlo
+
+### Notas
+El demo es **complementario** al roadmap, no lo reemplaza. La app nativa sigue siendo el producto final. El demo sirve como (1) validación rápida con el cliente, (2) prototipo de UX, (3) referencia para las APIs que el backend Python implementará después.
 
 ---
 

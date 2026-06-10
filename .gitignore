@@ -141,6 +141,21 @@ admin-web/yarn-error.log*
 admin-web/.pnpm-store/
 
 # -----------------------------
+# Node / Demo Web (Next.js + Vercel)
+# -----------------------------
+demo-web/node_modules/
+demo-web/.next/
+demo-web/.turbo/
+demo-web/out/
+demo-web/.vercel/
+demo-web/dist/
+demo-web/coverage/
+demo-web/npm-debug.log*
+demo-web/.pnpm-store/
+demo-web/prisma/.cache/
+demo-web/*.tsbuildinfo
+
+# -----------------------------
 # Docker
 # -----------------------------
 .docker/

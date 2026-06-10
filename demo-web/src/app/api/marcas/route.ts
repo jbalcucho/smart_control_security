@@ -1,0 +1,186 @@
+/**
+ * API: /api/marcas
+ *
+ *   GET  → lista marcas (filtros: userId, esFraude, limit). Guardia ve solo las suyas.
+ *   POST → crea una nueva marca con foto + GPS + validación de geofence.
+ *
+ * Implementación completa del Sprint Demo 2.
+ */
+
+import { NextResponse, type NextRequest } from "next/server";
+
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { validateGeofence } from "@/lib/geofence";
+import { uploadMarcaFotoFromDataUrl } from "@/lib/s3";
+import { crearMarcaSchema } from "@/lib/validations";
+import { TipoAlerta, Severidad } from "@prisma/client";
+
+// ============================================================
+// GET: listado de marcas (con filtros)
+// ============================================================
+
+export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const userId = searchParams.get("userId");
+  const limit = Number(searchParams.get("limit") ?? 50);
+
+  // Guardia solo puede ver SUS marcas. Supervisor/Admin pueden filtrar.
+  const where =
+    session.user.rol === "GUARDIA"
+      ? { userId: session.user.id }
+      : userId
+        ? { userId }
+        : {};
+
+  const marcas = await prisma.marca.findMany({
+    where,
+    include: { user: true, puesto: true, alerta: true },
+    orderBy: { timestampServidor: "desc" },
+    take: Math.min(limit, 200),
+  });
+
+  return NextResponse.json(marcas);
+}
+
+// ============================================================
+// POST: crear una marca
+// ============================================================
+
+export async function POST(request: NextRequest) {
+  // ---------- 1. Sesión + rol ----------
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+  if (session.user.rol !== "GUARDIA") {
+    return NextResponse.json(
+      { error: "Solo los guardias pueden registrar marcas" },
+      { status: 403 },
+    );
+  }
+
+  // ---------- 2. Parseo + validación del body ----------
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  }
+
+  const parsed = crearMarcaSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      {
+        error: "Datos inválidos",
+        details: parsed.error.flatten().fieldErrors,
+      },
+      { status: 422 },
+    );
+  }
+
+  const { tipo, latitud, longitud, precisionM, timestampCliente, fotoBase64 } =
+    parsed.data;
+
+  // ---------- 3. Verificar que tenga puesto asignado ----------
+  const guardia = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    include: { puesto: true },
+  });
+
+  if (!guardia || !guardia.puesto) {
+    return NextResponse.json(
+      { error: "No tienes un puesto asignado. Contacta a tu supervisor." },
+      { status: 409 },
+    );
+  }
+  const puesto = guardia.puesto;
+
+  // ---------- 4. Validación de geofence (server-side, no se confía en el cliente) ----------
+  const { dentroDelGeofence, distanciaM, motivoFraude } = validateGeofence(
+    latitud,
+    longitud,
+    puesto.latitud,
+    puesto.longitud,
+    puesto.radioGeofenceM,
+  );
+
+  // ---------- 5. Subir foto (S3 o inline según config) ----------
+  let upload;
+  try {
+    upload = await uploadMarcaFotoFromDataUrl(session.user.id, fotoBase64);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Error subiendo la foto";
+    return NextResponse.json(
+      { error: `No se pudo guardar la foto: ${message}` },
+      { status: 500 },
+    );
+  }
+
+  // ---------- 6. Crear la marca (+ alerta si aplica) en una transacción ----------
+  const userAgent = request.headers.get("user-agent") ?? null;
+  const esFraude = !dentroDelGeofence;
+
+  const marca = await prisma.$transaction(async (tx) => {
+    const created = await tx.marca.create({
+      data: {
+        userId: session.user.id,
+        puestoId: puesto.id,
+        tipo,
+        fotoUrl: upload.url,
+        fotoKey: upload.key,
+        latitud,
+        longitud,
+        precisionM,
+        distanciaPuestoM: distanciaM,
+        dentroDelGeofence,
+        esFraude,
+        motivoFraude,
+        timestampCliente: new Date(timestampCliente),
+        userAgent,
+      },
+      include: { user: true, puesto: true },
+    });
+
+    if (esFraude) {
+      await tx.alerta.create({
+        data: {
+          marcaId: created.id,
+          tipo: TipoAlerta.FUERA_GEOFENCE,
+          severidad: Severidad.ALTA,
+          mensaje: `${created.user.nombre} marcó fuera del geofence del puesto ${puesto.nombre} (${Math.round(distanciaM)}m).`,
+        },
+      });
+    }
+
+    return created;
+  });
+
+  // ---------- 7. Respuesta ----------
+  return NextResponse.json(
+    {
+      ok: true,
+      marca: {
+        id: marca.id,
+        tipo: marca.tipo,
+        dentroDelGeofence: marca.dentroDelGeofence,
+        distanciaPuestoM: marca.distanciaPuestoM,
+        esFraude: marca.esFraude,
+        motivoFraude: marca.motivoFraude,
+        timestampServidor: marca.timestampServidor,
+        puesto: {
+          id: puesto.id,
+          nombre: puesto.nombre,
+          radioGeofenceM: puesto.radioGeofenceM,
+        },
+        storage: upload.storage,
+      },
+    },
+    { status: 201 },
+  );
+}
