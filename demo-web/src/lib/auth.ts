@@ -11,6 +11,8 @@
 
 import NextAuth, { type DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+// Importar el submódulo para que TypeScript permita augmentar `JWT`
+import "next-auth/jwt";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 

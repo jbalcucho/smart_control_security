@@ -75,7 +75,7 @@ interface ParsedDataUrl {
  */
 function parseDataUrl(dataUrl: string): ParsedDataUrl {
   const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-  if (!match) {
+  if (!match || !match[1] || !match[2]) {
     throw new Error("Formato de data URL inválido (se esperaba base64).");
   }
   const contentType = match[1];
