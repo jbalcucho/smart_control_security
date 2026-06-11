@@ -36,12 +36,28 @@ enum TipoAlerta {
   FOTO_INVALIDA
   HORARIO_FUERA_TURNO
   GPS_IMPRECISO
+  NOVEDAD_PANICO
+  NOVEDAD_REFUERZO
 }
 
 enum Severidad {
   BAJA
   MEDIA
   ALTA
+}
+
+enum TipoNovedad {
+  GENERAL       // incidente menor / reporte genérico
+  REFUERZO      // necesita refuerzos / personal adicional
+  PANICO        // emergencia inmediata
+  INFORMATIVA   // solo registro, sin acción urgente
+}
+
+enum EstadoNovedad {
+  PENDIENTE
+  EN_ATENCION
+  RESUELTA
+  DESCARTADA
 }
 
 // ============================================================
@@ -72,6 +88,7 @@ model User {
   updatedAt    DateTime @updatedAt
 
   marcas       Marca[]
+  novedades    Novedad[]
 
   @@index([rol])
   @@index([puestoId])
@@ -98,6 +115,7 @@ model Puesto {
 
   guardias       User[]
   marcas         Marca[]
+  novedades      Novedad[]
 
   @@index([activo])
 }
@@ -149,14 +167,24 @@ model Marca {
 }
 
 // ============================================================
-// Alerta — generada automáticamente cuando una marca es sospechosa
+// Alerta — generada automáticamente cuando una Marca o Novedad
+// requiere atención del supervisor
 // ============================================================
+//
+// Una Alerta puede provenir de:
+//   - Una Marca sospechosa (ej. fraude por geofence)
+//   - Una Novedad reportada por el guardia (panico, refuerzo)
+//
+// Exactamente uno de los dos FKs es no-nulo (validado a nivel app).
 
 model Alerta {
   id          String      @id @default(cuid())
 
-  marcaId     String      @unique
-  marca       Marca       @relation(fields: [marcaId], references: [id], onDelete: Cascade)
+  marcaId     String?     @unique
+  marca       Marca?      @relation(fields: [marcaId], references: [id], onDelete: Cascade)
+
+  novedadId   String?     @unique
+  novedad     Novedad?    @relation(fields: [novedadId], references: [id], onDelete: Cascade)
 
   tipo        TipoAlerta
   severidad   Severidad
@@ -171,5 +199,49 @@ model Alerta {
   createdAt   DateTime    @default(now())
 
   @@index([resuelta, severidad, createdAt(sort: Desc)])
+  @@index([tipo])
+}
+
+// ============================================================
+// Novedad — reporte voluntario del guardia desde su puesto
+// (incidente, solicitud de refuerzos, botón de pánico, etc.)
+// ============================================================
+
+model Novedad {
+  id                  String         @id @default(cuid())
+
+  userId              String
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  puestoId            String?
+  puesto              Puesto?        @relation(fields: [puestoId], references: [id], onDelete: SetNull)
+
+  tipo                TipoNovedad
+  severidad           Severidad
+  descripcion         String         // libre, breve. Para PANICO puede ser default.
+  refuerzosNecesarios Boolean        @default(false)
+
+  // GPS opcional (el guardia puede negar el permiso o no estar disponible)
+  latitud             Float?
+  longitud            Float?
+  precisionM          Float?
+
+  // Workflow del supervisor
+  estado              EstadoNovedad  @default(PENDIENTE)
+  atendidaPor         String?        // userId del supervisor
+  atendidaEn          DateTime?
+  notasSupervisor     String?
+
+  // Timestamps duales (cliente vs servidor)
+  timestampCliente    DateTime
+  timestampServidor   DateTime       @default(now())
+
+  userAgent           String?
+
+  alerta              Alerta?
+
+  @@index([estado, severidad, timestampServidor(sort: Desc)])
+  @@index([userId, timestampServidor(sort: Desc)])
+  @@index([puestoId, timestampServidor(sort: Desc)])
   @@index([tipo])
 }

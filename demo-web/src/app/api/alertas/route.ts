@@ -25,6 +25,12 @@ export async function GET(request: NextRequest) {
     where: onlyPending ? { resuelta: false } : {},
     include: {
       marca: { include: { user: true, puesto: true } },
+      novedad: {
+        include: {
+          user: { select: { id: true, nombre: true, email: true } },
+          puesto: { select: { id: true, nombre: true, direccion: true } },
+        },
+      },
     },
     orderBy: [{ severidad: "desc" }, { createdAt: "desc" }],
     take: 100,

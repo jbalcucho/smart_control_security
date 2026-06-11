@@ -9,10 +9,19 @@ import { prisma } from "@/lib/prisma";
 import { formatDistance, formatDateTime } from "@/lib/utils";
 
 export default async function DashboardPage() {
-  const [totalMarcas, totalFraudes, totalAlertasPendientes, marcas] = await Promise.all([
+  const [
+    totalMarcas,
+    totalFraudes,
+    totalAlertasPendientes,
+    novedadesPendientes,
+    novedadesPanico,
+    marcas,
+  ] = await Promise.all([
     prisma.marca.count(),
     prisma.marca.count({ where: { esFraude: true } }),
     prisma.alerta.count({ where: { resuelta: false } }),
+    prisma.novedad.count({ where: { estado: "PENDIENTE" } }),
+    prisma.novedad.count({ where: { estado: "PENDIENTE", tipo: "PANICO" } }),
     prisma.marca.findMany({
       include: { user: true, puesto: true, alerta: true },
       orderBy: { timestampServidor: "desc" },
@@ -30,7 +39,7 @@ export default async function DashboardPage() {
       </header>
 
       {/* KPIs */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <div className="card">
           <p className="text-xs uppercase tracking-wide text-gray-500">Marcas totales</p>
           <p className="mt-2 text-3xl font-bold text-gray-900">{totalMarcas}</p>
@@ -44,6 +53,46 @@ export default async function DashboardPage() {
         <div className="card">
           <p className="text-xs uppercase tracking-wide text-gray-500">Alertas pendientes</p>
           <p className="mt-2 text-3xl font-bold text-warning-600">{totalAlertasPendientes}</p>
+        </div>
+
+        <div
+          className={
+            novedadesPendientes > 0
+              ? "card bg-warning-50 ring-warning-500/30"
+              : "card"
+          }
+        >
+          <p className="text-xs uppercase tracking-wide text-gray-500">
+            Novedades pendientes
+          </p>
+          <p
+            className={
+              "mt-2 text-3xl font-bold tabular-nums " +
+              (novedadesPendientes > 0 ? "text-warning-700" : "text-gray-900")
+            }
+          >
+            {novedadesPendientes}
+          </p>
+        </div>
+
+        <div
+          className={
+            novedadesPanico > 0
+              ? "card bg-danger-50 ring-danger-300 animate-pulse"
+              : "card"
+          }
+        >
+          <p className="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-1">
+            <span aria-hidden>🚨</span> Pánico activo
+          </p>
+          <p
+            className={
+              "mt-2 text-3xl font-bold tabular-nums " +
+              (novedadesPanico > 0 ? "text-danger-700" : "text-gray-900")
+            }
+          >
+            {novedadesPanico}
+          </p>
         </div>
       </div>
 
@@ -102,9 +151,6 @@ export default async function DashboardPage() {
           </table>
         )}
 
-        <p className="mt-4 text-xs text-gray-400">
-          Auto-refresh cada 5 segundos (pendiente — Sprint Demo 4)
-        </p>
       </div>
     </div>
   );

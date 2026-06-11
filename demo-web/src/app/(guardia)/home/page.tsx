@@ -11,6 +11,7 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatTime } from "@/lib/utils";
+import { BotonPanico } from "@/components/guardia/BotonPanico";
 
 export default async function HomeGuardiaPage() {
   const session = await auth();
@@ -101,6 +102,46 @@ export default async function HomeGuardiaPage() {
         <div className="text-lg font-bold">Marcar asistencia</div>
         <div className="mt-1 text-sm text-white/80">Captura selfie + ubicación</div>
       </Link>
+
+      {/* Reportar novedad (secundario) */}
+      <Link
+        href="/novedad/nueva"
+        className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm transition-colors hover:bg-gray-50 active:scale-[0.98]"
+      >
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-warning-100 text-warning-700">
+          <svg
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+        </div>
+        <div className="flex-1 text-left">
+          <p className="text-base font-bold text-gray-900">Reportar novedad</p>
+          <p className="text-xs text-gray-500">
+            Incidente, solicitud de refuerzos o reporte informativo
+          </p>
+        </div>
+        <svg
+          className="h-5 w-5 text-gray-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </Link>
+
+      {/* Botón de pánico */}
+      <BotonPanico />
     </div>
   );
 }

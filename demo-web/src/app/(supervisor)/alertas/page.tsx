@@ -1,75 +1,63 @@
 /**
  * Panel de Alertas del Supervisor.
  *
- * Estado: PLACEHOLDER — se implementará en Sprint Demo 4.
- * Mostrará: alertas pendientes con flujo de "atender / resolver".
+ * Server Component que precarga las alertas pendientes (Marca + Novedad)
+ * y delega el render + auto-refresh a <AlertasList /> (client component).
  */
 
 import { prisma } from "@/lib/prisma";
-import { formatRelative } from "@/lib/utils";
+import { AlertasList, type AlertaListItem } from "@/components/supervisor/AlertasList";
+
+const POLL_MS = Number(process.env.NEXT_PUBLIC_DASHBOARD_POLL_MS ?? 5000);
 
 export default async function AlertasPage() {
   const alertas = await prisma.alerta.findMany({
     where: { resuelta: false },
     include: {
-      marca: { include: { user: true, puesto: true } },
+      marca: {
+        include: {
+          user: { select: { id: true, nombre: true, email: true } },
+          puesto: { select: { id: true, nombre: true } },
+        },
+      },
+      novedad: {
+        include: {
+          user: { select: { id: true, nombre: true, email: true } },
+          puesto: { select: { id: true, nombre: true, direccion: true } },
+        },
+      },
     },
     orderBy: [{ severidad: "desc" }, { createdAt: "desc" }],
   });
 
-  return (
-    <div className="space-y-4 animate-fade-in">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-900">Alertas pendientes</h1>
-        <p className="mt-1 text-sm text-gray-600">{alertas.length} sin atender</p>
-      </header>
+  // Adaptamos a la forma serializada que espera el client component.
+  const initial: AlertaListItem[] = alertas.map((a) => ({
+    id: a.id,
+    tipo: a.tipo,
+    severidad: a.severidad,
+    mensaje: a.mensaje,
+    resuelta: a.resuelta,
+    createdAt: a.createdAt.toISOString(),
+    marca: a.marca
+      ? {
+          id: a.marca.id,
+          user: a.marca.user,
+          puesto: { id: a.marca.puesto.id, nombre: a.marca.puesto.nombre },
+        }
+      : null,
+    novedad: a.novedad
+      ? {
+          id: a.novedad.id,
+          tipo: a.novedad.tipo,
+          descripcion: a.novedad.descripcion,
+          refuerzosNecesarios: a.novedad.refuerzosNecesarios,
+          latitud: a.novedad.latitud,
+          longitud: a.novedad.longitud,
+          user: a.novedad.user,
+          puesto: a.novedad.puesto,
+        }
+      : null,
+  }));
 
-      {alertas.length === 0 ? (
-        <div className="card text-center text-gray-500">
-          <p>No hay alertas pendientes. </p>
-        </div>
-      ) : (
-        <ul className="space-y-3">
-          {alertas.map((a) => (
-            <li key={a.id} className="card">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={
-                        "rounded-full px-2 py-0.5 text-xs font-medium " +
-                        (a.severidad === "ALTA"
-                          ? "bg-danger-100 text-danger-700"
-                          : a.severidad === "MEDIA"
-                            ? "bg-warning-100 text-warning-700"
-                            : "bg-gray-100 text-gray-700")
-                      }
-                    >
-                      {a.severidad}
-                    </span>
-                    <span className="text-xs text-gray-500">{a.tipo}</span>
-                  </div>
-
-                  <p className="mt-2 text-sm font-medium text-gray-900">{a.mensaje}</p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {a.marca.user.nombre} · {a.marca.puesto.nombre} ·{" "}
-                    {formatRelative(a.createdAt)}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  className="btn-secondary text-xs"
-                  disabled
-                  title="Pendiente: Sprint Demo 4"
-                >
-                  Atender
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+  return <AlertasList initial={initial} pollMs={POLL_MS} />;
 }

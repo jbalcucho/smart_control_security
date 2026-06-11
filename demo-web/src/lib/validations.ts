@@ -35,3 +35,65 @@ export const crearMarcaSchema = z.object({
 });
 
 export type CrearMarcaInput = z.infer<typeof crearMarcaSchema>;
+
+/**
+ * Validación del payload para crear una novedad.
+ * Lo envía el guardia desde el browser (formulario o botón de pánico).
+ *
+ * GPS es opcional porque el guardia puede negar el permiso, o en el caso
+ * del pánico queremos enviar igual aunque el GPS aún no esté disponible.
+ */
+export const crearNovedadSchema = z
+  .object({
+    tipo: z.enum(["GENERAL", "REFUERZO", "PANICO", "INFORMATIVA"]),
+    descripcion: z
+      .string()
+      .trim()
+      .max(2000, "La descripción es demasiado larga (máx 2000 caracteres)")
+      .optional()
+      .default(""),
+    refuerzosNecesarios: z.boolean().optional().default(false),
+    latitud: z.number().min(-90).max(90).optional(),
+    longitud: z.number().min(-180).max(180).optional(),
+    precisionM: z.number().positive().optional(),
+    timestampCliente: z.string().datetime(),
+  })
+  .refine(
+    (data) => {
+      // Para novedades NO-PANICO, la descripción es obligatoria (mín 5 chars).
+      if (data.tipo === "PANICO") return true;
+      return data.descripcion !== undefined && data.descripcion.trim().length >= 5;
+    },
+    {
+      message: "La descripción es obligatoria y debe tener al menos 5 caracteres",
+      path: ["descripcion"],
+    },
+  )
+  .refine(
+    (data) => {
+      // Si viene una coordenada, deben venir las dos.
+      const hasLat = data.latitud !== undefined;
+      const hasLng = data.longitud !== undefined;
+      return hasLat === hasLng;
+    },
+    {
+      message: "Si envías GPS debes incluir latitud y longitud",
+      path: ["latitud"],
+    },
+  );
+
+export type CrearNovedadInput = z.infer<typeof crearNovedadSchema>;
+
+/**
+ * Validación del payload para resolver una novedad (supervisor).
+ */
+export const resolverNovedadSchema = z.object({
+  estado: z.enum(["EN_ATENCION", "RESUELTA", "DESCARTADA"]),
+  notasSupervisor: z
+    .string()
+    .trim()
+    .max(2000, "Las notas son demasiado largas (máx 2000 caracteres)")
+    .optional(),
+});
+
+export type ResolverNovedadInput = z.infer<typeof resolverNovedadSchema>;
