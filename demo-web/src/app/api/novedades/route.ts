@@ -181,6 +181,26 @@ export async function POST(request: NextRequest) {
 
   const userAgent = request.headers.get("user-agent") ?? null;
 
+  // ---------- 4b. Fallback de coordenadas ----------
+  // Si el cliente no logró capturar GPS a tiempo (caso típico del botón de
+  // pánico: countdown corto y primer fix de geolocalización lento) y el
+  // guardia tiene puesto asignado con coordenadas, usamos las del puesto.
+  // Marcamos `precisionM = null` para que el mapa pueda distinguir entre
+  // "ubicación GPS real" y "ubicación aproximada del puesto".
+  let latFinal: number | null = latitud ?? null;
+  let lonFinal: number | null = longitud ?? null;
+  let precFinal: number | null = precisionM ?? null;
+  if (
+    (latFinal == null || lonFinal == null) &&
+    guardia.puesto &&
+    guardia.puesto.latitud != null &&
+    guardia.puesto.longitud != null
+  ) {
+    latFinal = guardia.puesto.latitud;
+    lonFinal = guardia.puesto.longitud;
+    precFinal = null;
+  }
+
   // ---------- 5. Crear novedad + alerta (si aplica) en transacción ----------
   const { novedad, alerta } = await prisma.$transaction(async (tx) => {
     const novedadCreada = await tx.novedad.create({
@@ -191,9 +211,9 @@ export async function POST(request: NextRequest) {
         severidad,
         descripcion: descripcionFinal,
         refuerzosNecesarios: refuerzosNecesarios ?? false,
-        latitud: latitud ?? null,
-        longitud: longitud ?? null,
-        precisionM: precisionM ?? null,
+        latitud: latFinal,
+        longitud: lonFinal,
+        precisionM: precFinal,
         timestampCliente: new Date(timestampCliente),
         userAgent,
       },

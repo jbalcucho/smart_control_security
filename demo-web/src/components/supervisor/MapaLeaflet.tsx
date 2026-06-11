@@ -530,6 +530,17 @@ function NovedadPopup({ novedad, isNew }: { novedad: NovedadMapa; isNew: boolean
         <p className="text-xs font-medium text-warning-700">Solicita refuerzos</p>
       )}
       <p className="text-xs text-gray-500">
+        {novedad.precisionM != null ? (
+          <>
+            GPS: <span className="tabular-nums">±{Math.round(novedad.precisionM)}m</span>
+          </>
+        ) : (
+          <span className="italic text-warning-700">
+            Ubicación aproximada (puesto asignado)
+          </span>
+        )}
+      </p>
+      <p className="text-xs text-gray-500">
         {formatRelative(new Date(novedad.timestampServidor))}
       </p>
       <a

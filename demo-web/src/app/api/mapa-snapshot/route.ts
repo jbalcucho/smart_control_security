@@ -6,7 +6,10 @@
  *
  *   - Sólo accesible a SUPERVISOR/ADMIN.
  *   - "Marcas recientes" = últimas N (por defecto 50) con coordenadas.
- *   - "Novedades activas" = estado PENDIENTE o EN_ATENCION y que tengan GPS.
+ *   - "Novedades activas" = estado PENDIENTE o EN_ATENCION. Si la novedad
+ *     no trajo GPS (caso típico de botón de pánico con countdown corto),
+ *     usamos las coords del puesto asignado y dejamos precisionM=null para
+ *     que el cliente pueda etiquetarlas como "ubicación aproximada".
  *
  * Diseñado para ser consumido por polling (cada 10-15s) sin sobrecargar la BD.
  */
@@ -67,8 +70,6 @@ export async function GET(request: NextRequest) {
     prisma.novedad.findMany({
       where: {
         estado: { in: ["PENDIENTE", "EN_ATENCION"] },
-        latitud: { not: null },
-        longitud: { not: null },
       },
       orderBy: { timestampServidor: "desc" },
       take: 100,
@@ -84,15 +85,43 @@ export async function GET(request: NextRequest) {
         precisionM: true,
         timestampServidor: true,
         user: { select: { id: true, nombre: true } },
-        puesto: { select: { id: true, nombre: true } },
+        puesto: {
+          select: { id: true, nombre: true, latitud: true, longitud: true },
+        },
       },
     }),
   ]);
 
+  // Completar coords desde el puesto si la novedad no trae GPS, y descartar
+  // las que tampoco se pueden ubicar (sin GPS y sin puesto con coords).
+  const novedadesMapa = novedades.flatMap((n) => {
+    const lat = n.latitud ?? n.puesto?.latitud ?? null;
+    const lon = n.longitud ?? n.puesto?.longitud ?? null;
+    if (lat == null || lon == null) return [];
+    return [
+      {
+        id: n.id,
+        tipo: n.tipo,
+        severidad: n.severidad,
+        estado: n.estado,
+        descripcion: n.descripcion,
+        refuerzosNecesarios: n.refuerzosNecesarios,
+        latitud: lat,
+        longitud: lon,
+        precisionM: n.precisionM,
+        timestampServidor: n.timestampServidor,
+        user: n.user,
+        puesto: n.puesto
+          ? { id: n.puesto.id, nombre: n.puesto.nombre }
+          : null,
+      },
+    ];
+  });
+
   return NextResponse.json({
     puestos,
     marcas,
-    novedades,
+    novedades: novedadesMapa,
     generatedAt: new Date().toISOString(),
   });
 }

@@ -55,6 +55,17 @@ export function BotonPanico() {
 
   // ----------------------------------------------------------
   // Captura de GPS oportunista (no bloquea el envío)
+  //
+  // Diseño intencional:
+  //   - `enableHighAccuracy: false` → primer fix mucho más rápido (red/celdas).
+  //     El primer fix de alta precisión típico tarda 10-30s, y nuestro
+  //     countdown es de 3s, así que casi nunca llegaría a tiempo. Para el
+  //     caso de pánico, conocer la posición aproximada en segundos es mucho
+  //     más valioso que conocer la exacta varios minutos después.
+  //   - `maximumAge: 120_000` → si el browser tiene una lectura reciente
+  //     (de hasta 2 min atrás) la reusa sin pedir un fix nuevo: instantáneo.
+  //   - Si el GPS no llega a tiempo, el server-side aplica fallback a las
+  //     coords del puesto asignado, así la novedad SIEMPRE aparece en el mapa.
   // ----------------------------------------------------------
   const fetchGpsBest = useCallback(() => {
     if (typeof navigator === "undefined" || !navigator.geolocation) return;
@@ -67,9 +78,9 @@ export function BotonPanico() {
         };
       },
       () => {
-        // ignoramos errores — el pánico sale sin GPS
+        // ignoramos errores — el pánico sale sin GPS (server hace fallback)
       },
-      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 5_000 },
+      { enableHighAccuracy: false, maximumAge: 120_000, timeout: 8_000 },
     );
   }, []);
 
@@ -118,8 +129,9 @@ export function BotonPanico() {
   // Acciones
   // ----------------------------------------------------------
   const startCountdown = useCallback(() => {
-    gpsRef.current = null;
-    fetchGpsBest(); // dispara GPS en background
+    // No reseteamos gpsRef: si quedó una lectura previa (ej. el guardia
+    // pulsó antes y canceló), la reusamos para no perderla.
+    fetchGpsBest(); // dispara GPS en background; puede llegar antes del envío
     const startedAt = Date.now();
     const totalMs = COUNTDOWN_SEC * 1000;
     setState({ kind: "confirming", remainingMs: totalMs });
