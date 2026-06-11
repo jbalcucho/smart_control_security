@@ -67,15 +67,27 @@ interface MarcaWizardProps {
   demoMode: boolean;
   /** Precisión mínima aceptable en metros para considerar el GPS "bueno". */
   maxGpsPrecisionM: number;
+  /**
+   * Tipo con el que arranca el switch ENTRADA/SALIDA. El server lo deriva del
+   * estado actual del guardia: si está EN_TURNO arranca en "SALIDA" (lo más
+   * probable es que vaya a cerrar); de lo contrario arranca en "ENTRADA".
+   * El guardia puede cambiarlo manualmente con el toggle.
+   */
+  tipoInicial?: "ENTRADA" | "SALIDA";
 }
 
 // ============================================================
 // Componente
 // ============================================================
 
-export function MarcaWizard({ puesto, demoMode, maxGpsPrecisionM }: MarcaWizardProps) {
+export function MarcaWizard({
+  puesto,
+  demoMode,
+  maxGpsPrecisionM,
+  tipoInicial = "ENTRADA",
+}: MarcaWizardProps) {
   const [step, setStep] = useState<WizardStep>({ kind: "gps" });
-  const [tipo, setTipo] = useState<"ENTRADA" | "SALIDA">("ENTRADA");
+  const [tipo, setTipo] = useState<"ENTRADA" | "SALIDA">(tipoInicial);
 
   // ----------------------------------------------------------
   // Acciones de navegación entre pasos

@@ -10,6 +10,7 @@
 import Link from "next/link";
 
 import { auth } from "@/lib/auth";
+import { obtenerEstadoGuardia } from "@/lib/estado-guardia";
 import { prisma } from "@/lib/prisma";
 import { MarcaWizard } from "@/components/guardia/MarcaWizard";
 
@@ -17,10 +18,13 @@ export default async function MarcarPage() {
   const session = await auth();
   if (!session?.user) return null;
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    include: { puesto: true },
-  });
+  const [user, { estado }] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      include: { puesto: true },
+    }),
+    obtenerEstadoGuardia(session.user.id),
+  ]);
 
   // Sin puesto asignado → no puede marcar
   if (!user?.puesto) {
@@ -47,6 +51,14 @@ export default async function MarcarPage() {
   const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
   const maxGpsPrecisionM = Number(process.env.NEXT_PUBLIC_GPS_PRECISION_MIN_M ?? 50);
 
+  // Si el guardia está EN_TURNO arrancamos el switch en SALIDA (lo más
+  // probable es que venga a cerrar su turno). En cualquier otro caso
+  // arrancamos en ENTRADA. El switch sigue siendo cambiable por el guardia.
+  const tipoInicial: "ENTRADA" | "SALIDA" =
+    estado === "EN_TURNO" ? "SALIDA" : "ENTRADA";
+  const tituloAccion =
+    tipoInicial === "SALIDA" ? "Marcar salida" : "Marcar entrada";
+
   return (
     <div className="space-y-4">
       <header className="flex items-center gap-3">
@@ -60,7 +72,7 @@ export default async function MarcarPage() {
           </svg>
         </Link>
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Marcar asistencia</h1>
+          <h1 className="text-xl font-bold text-gray-900">{tituloAccion}</h1>
           <p className="text-xs text-gray-500">Sigue los 3 pasos del wizard</p>
         </div>
       </header>
@@ -76,6 +88,7 @@ export default async function MarcarPage() {
         }}
         demoMode={demoMode}
         maxGpsPrecisionM={maxGpsPrecisionM}
+        tipoInicial={tipoInicial}
       />
     </div>
   );
