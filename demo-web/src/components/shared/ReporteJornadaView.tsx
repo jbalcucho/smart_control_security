@@ -21,6 +21,7 @@ import {
   type Jornada,
   type ReporteJornada,
 } from "@/lib/reporte-jornada";
+import { MarcaMapaModal } from "./MarcaMapaModal";
 
 export interface MarcaSerialized {
   id: string;
@@ -45,7 +46,11 @@ interface ReporteApiResponse {
     turnoFin: string | null;
     puesto: { id: string; nombre: string; direccion: string } | null;
   };
+  /** Fecha del reporte (YYYY-MM-DD) o cadena vacía si se usa un rango. */
   fecha: string;
+  /** Etiqueta opcional que reemplaza el cálculo a partir de `fecha`
+   *  (útil para rangos como "Últimos 7 días" o "12 jun – 18 jun"). */
+  fechaLabel?: string;
   reporte: ReporteJornadaSerialized;
   marcas?: MarcaSerialized[];
 }
@@ -77,10 +82,13 @@ interface Props {
   data: ReporteApiResponse;
   /** Si es true, muestra el bloque con email + puesto del guardia (vista supervisor). */
   mostrarPerfil?: boolean;
-}
-
-function googleMapsLink(lat: number, lng: number): string {
-  return `https://www.google.com/maps?q=${lat},${lng}`;
+  /** Coords del puesto y radio del geofence, para dibujarlo en el modal del mapa. */
+  puestoCoords?: {
+    nombre: string;
+    latitud: number;
+    longitud: number;
+    radioGeofenceM: number;
+  } | null;
 }
 
 function tipoMeta(tipo: MarcaSerialized["tipo"]): {
@@ -116,14 +124,22 @@ function tipoMeta(tipo: MarcaSerialized["tipo"]): {
   }
 }
 
-export function ReporteJornadaView({ data, mostrarPerfil = false }: Props) {
+export function ReporteJornadaView({
+  data,
+  mostrarPerfil = false,
+  puestoCoords = null,
+}: Props) {
   const { guardia, fecha, reporte, marcas = [] } = data;
-  const fechaLabel = new Date(`${fecha}T00:00:00`).toLocaleDateString("es-CO", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const fechaLabel =
+    data.fechaLabel ??
+    (fecha
+      ? new Date(`${fecha}T00:00:00`).toLocaleDateString("es-CO", {
+          weekday: "long",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })
+      : "Periodo seleccionado");
 
   // Index por id para que las jornadas puedan resolver mini-info GPS rápida.
   const marcaById = new Map(marcas.map((m) => [m.id, m]));
@@ -206,12 +222,15 @@ export function ReporteJornadaView({ data, mostrarPerfil = false }: Props) {
             jornada={j}
             index={i + 1}
             marcaById={marcaById}
+            puestoCoords={puestoCoords}
           />
         ))
       )}
 
       {/* Marcas del día (cronológico, con foto + GPS link de cada una) */}
-      {marcas.length > 0 && <MarcasDelDia marcas={marcas} />}
+      {marcas.length > 0 && (
+        <MarcasDelDia marcas={marcas} puestoCoords={puestoCoords} />
+      )}
     </div>
   );
 }
@@ -224,10 +243,12 @@ function JornadaCard({
   jornada,
   index,
   marcaById,
+  puestoCoords,
 }: {
   jornada: JornadaSerialized;
   index: number;
   marcaById: Map<string, MarcaSerialized>;
+  puestoCoords?: Props["puestoCoords"];
 }) {
   const inicio = new Date(jornada.inicio);
   const fin = new Date(jornada.fin);
@@ -304,7 +325,10 @@ function JornadaCard({
                       </td>
                       <td className="py-2 pr-2 tabular-nums">
                         <span>{formatHourMinute(new Date(r.salida))}</span>
-                        <MiniGpsLink marca={salidaMarca} />
+                        <MiniMapaTrigger
+                          marca={salidaMarca}
+                          puestoCoords={puestoCoords}
+                        />
                       </td>
                       <td className="py-2 pr-2 tabular-nums">
                         <span>{formatHourMinute(new Date(r.entrada))}</span>
@@ -316,7 +340,10 @@ function JornadaCard({
                             auto
                           </span>
                         ) : (
-                          <MiniGpsLink marca={entradaMarca} />
+                          <MiniMapaTrigger
+                            marca={entradaMarca}
+                            puestoCoords={puestoCoords}
+                          />
                         )}
                       </td>
                       <td className="py-2 text-right font-semibold tabular-nums text-gray-900">
@@ -334,25 +361,29 @@ function JornadaCard({
   );
 }
 
-function MiniGpsLink({ marca }: { marca: MarcaSerialized | null | undefined }) {
+function MiniMapaTrigger({
+  marca,
+  puestoCoords,
+}: {
+  marca: MarcaSerialized | null | undefined;
+  puestoCoords?: Props["puestoCoords"];
+}) {
   if (!marca || marca.latitud == null || marca.longitud == null) return null;
   return (
-    <a
-      href={googleMapsLink(marca.latitud, marca.longitud)}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={`Abrir en Google Maps (${marca.latitud.toFixed(5)}, ${marca.longitud.toFixed(5)})`}
-      className="ml-1 inline-flex items-center text-primary-700 hover:text-primary-900"
-      aria-label="Ver ubicación en Google Maps"
-    >
-      <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-        <path
-          fillRule="evenodd"
-          clipRule="evenodd"
-          d="M10 18s-7-5.5-7-11a7 7 0 1114 0c0 5.5-7 11-7 11zm0-8.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z"
-        />
-      </svg>
-    </a>
+    <MarcaMapaModal
+      marca={{
+        tipo: marca.tipo,
+        latitud: marca.latitud,
+        longitud: marca.longitud,
+        esFraude: marca.esFraude,
+        precisionM: marca.precisionM,
+        distanciaPuestoM: marca.distanciaPuestoM,
+        fotoUrl: marca.fotoUrl,
+        timestamp: marca.timestampServidor,
+      }}
+      puesto={puestoCoords ?? null}
+      iconOnly
+    />
   );
 }
 
@@ -360,7 +391,13 @@ function MiniGpsLink({ marca }: { marca: MarcaSerialized | null | undefined }) {
 // Marcas del día (lista cronológica con foto + GPS)
 // ============================================================
 
-function MarcasDelDia({ marcas }: { marcas: MarcaSerialized[] }) {
+function MarcasDelDia({
+  marcas,
+  puestoCoords,
+}: {
+  marcas: MarcaSerialized[];
+  puestoCoords?: Props["puestoCoords"];
+}) {
   return (
     <section className="card">
       <h3 className="text-sm font-semibold text-gray-900">
@@ -371,19 +408,26 @@ function MarcasDelDia({ marcas }: { marcas: MarcaSerialized[] }) {
       </h3>
       <p className="mt-0.5 text-xs text-gray-500">
         Foto y ubicación de cada evento (entrada, salida, refrigerios). Toca la
-        foto para verla en grande o el pin para abrir Google Maps.
+        foto para verla en grande o el botón <strong>Mapa</strong> para abrir
+        el mini-mapa.
       </p>
 
       <ul className="mt-3 space-y-2">
         {marcas.map((m) => (
-          <MarcaItem key={m.id} marca={m} />
+          <MarcaItem key={m.id} marca={m} puestoCoords={puestoCoords} />
         ))}
       </ul>
     </section>
   );
 }
 
-function MarcaItem({ marca }: { marca: MarcaSerialized }) {
+function MarcaItem({
+  marca,
+  puestoCoords,
+}: {
+  marca: MarcaSerialized;
+  puestoCoords?: Props["puestoCoords"];
+}) {
   const meta = tipoMeta(marca.tipo);
   const fecha = new Date(marca.timestampServidor);
 
@@ -470,24 +514,23 @@ function MarcaItem({ marca }: { marca: MarcaSerialized }) {
         </div>
       </div>
 
-      {/* GPS link */}
+      {/* Botón con modal de mini-mapa Leaflet (in-app, sin abrir Google Maps) */}
       {marca.latitud != null && marca.longitud != null && (
-        <a
-          href={googleMapsLink(marca.latitud, marca.longitud)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex shrink-0 items-center gap-1 rounded-lg bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary-700 ring-1 ring-primary-200 hover:bg-primary-100"
-          title={`Abrir en Google Maps (${marca.latitud.toFixed(5)}, ${marca.longitud.toFixed(5)})`}
-        >
-          <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fillRule="evenodd"
-              clipRule="evenodd"
-              d="M10 18s-7-5.5-7-11a7 7 0 1114 0c0 5.5-7 11-7 11zm0-8.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z"
-            />
-          </svg>
-          Mapa
-        </a>
+        <div className="flex shrink-0 items-center">
+          <MarcaMapaModal
+            marca={{
+              tipo: marca.tipo,
+              latitud: marca.latitud,
+              longitud: marca.longitud,
+              esFraude: marca.esFraude,
+              precisionM: marca.precisionM,
+              distanciaPuestoM: marca.distanciaPuestoM,
+              fotoUrl: marca.fotoUrl,
+              timestamp: marca.timestampServidor,
+            }}
+            puesto={puestoCoords ?? null}
+          />
+        </div>
       )}
     </li>
   );

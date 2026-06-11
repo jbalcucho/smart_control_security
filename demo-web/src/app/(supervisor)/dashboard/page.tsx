@@ -1,52 +1,21 @@
 /**
  * Dashboard del Supervisor.
  *
- * Acepta ?fecha=YYYY-MM-DD (default: hoy) o ?fecha=todas (sin filtro de día).
- * Cuando hay día seleccionado, las queries y la tabla se limitan a ese día.
+ * Acepta filtro de fecha (rango). Ver lib/rango-fecha.ts.
+ *   - ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD → rango explícito
+ *   - ?fecha=YYYY-MM-DD                  → un solo día
+ *   - ?fecha=todas                       → sin filtro
+ *   - sin query                          → "Hoy" por defecto
  */
 
 import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { estadoDesdeUltimaMarca } from "@/lib/estado-guardia";
+import { parseRango } from "@/lib/rango-fecha";
 import { formatDistance, formatDateTime } from "@/lib/utils";
 import { FechaSelector } from "@/components/shared/FechaSelector";
 import type { Prisma } from "@prisma/client";
-
-// ------------------------------------------------------------
-// Parseo de filtro de fecha
-// ------------------------------------------------------------
-
-interface FiltroDia {
-  /** "todas" si no hay filtro, o "YYYY-MM-DD". */
-  iso: string;
-  /** undefined cuando es "todas" (sin filtro de tiempo). */
-  rango: { gte: Date; lte: Date } | undefined;
-  label: string;
-}
-
-function parsearFiltro(raw: string | undefined): FiltroDia {
-  if (raw === "todas") {
-    return { iso: "todas", rango: undefined, label: "Periodo completo" };
-  }
-  const refRaw = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
-  const hoyIso = new Date().toISOString().slice(0, 10);
-  const iso = refRaw ?? hoyIso;
-  const ref = new Date(`${iso}T00:00:00`);
-  const desde = new Date(ref);
-  desde.setHours(0, 0, 0, 0);
-  const hasta = new Date(ref);
-  hasta.setHours(23, 59, 59, 999);
-  const esHoy = iso === hoyIso;
-  const label = esHoy
-    ? "Hoy"
-    : ref.toLocaleDateString("es-CO", {
-        weekday: "long",
-        day: "2-digit",
-        month: "long",
-      });
-  return { iso, rango: { gte: desde, lte: hasta }, label };
-}
 
 // "En refrigerio" es siempre "ahora mismo" (no se filtra por fecha histórica).
 async function contarEnRefrigerio(): Promise<number> {
@@ -76,30 +45,35 @@ async function contarEnRefrigerio(): Promise<number> {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ fecha?: string }>;
+  searchParams: Promise<{ fecha?: string; desde?: string; hasta?: string }>;
 }) {
-  const { fecha } = await searchParams;
-  const filtro = parsearFiltro(fecha);
+  const sp = await searchParams;
+  const rango = parseRango(sp, { defaultMode: "hoy" });
 
-  // Filtros condicionales para Prisma según haya rango de fecha o no.
-  const whereMarca: Prisma.MarcaWhereInput = filtro.rango
-    ? { timestampServidor: filtro.rango }
+  // Filtros condicionales para Prisma según haya rango o no.
+  const rangoPrisma =
+    rango.desde && rango.hasta
+      ? { gte: rango.desde, lte: rango.hasta }
+      : undefined;
+
+  const whereMarca: Prisma.MarcaWhereInput = rangoPrisma
+    ? { timestampServidor: rangoPrisma }
     : {};
   const whereMarcaFraude: Prisma.MarcaWhereInput = {
     ...whereMarca,
     esFraude: true,
   };
-  const whereAlerta: Prisma.AlertaWhereInput = filtro.rango
-    ? { resuelta: false, createdAt: filtro.rango }
+  const whereAlerta: Prisma.AlertaWhereInput = rangoPrisma
+    ? { resuelta: false, createdAt: rangoPrisma }
     : { resuelta: false };
-  const whereNovedadPend: Prisma.NovedadWhereInput = filtro.rango
-    ? { estado: "PENDIENTE", timestampServidor: filtro.rango }
+  const whereNovedadPend: Prisma.NovedadWhereInput = rangoPrisma
+    ? { estado: "PENDIENTE", timestampServidor: rangoPrisma }
     : { estado: "PENDIENTE" };
-  const whereNovedadPanico: Prisma.NovedadWhereInput = filtro.rango
+  const whereNovedadPanico: Prisma.NovedadWhereInput = rangoPrisma
     ? {
         estado: "PENDIENTE",
         tipo: "PANICO",
-        timestampServidor: filtro.rango,
+        timestampServidor: rangoPrisma,
       }
     : { estado: "PENDIENTE", tipo: "PANICO" };
 
@@ -131,16 +105,12 @@ export default async function DashboardPage({
       <header>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <p className="mt-1 text-sm text-gray-600">
-          <span className="font-medium capitalize">{filtro.label}</span> · marcas
+          <span className="font-medium capitalize">{rango.label}</span> · marcas
           y alertas del periodo seleccionado
         </p>
       </header>
 
-      <FechaSelector
-        basePath="/dashboard"
-        fechaActual={filtro.iso}
-        incluirTodas
-      />
+      <FechaSelector basePath="/dashboard" rangoActual={rango} />
 
       {/* KPIs */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -283,11 +253,7 @@ export default async function DashboardPage({
                   </td>
                   <td className="py-3 text-right">
                     <Link
-                      href={
-                        filtro.iso === "todas"
-                          ? `/guardias/${m.user.id}/reporte`
-                          : `/guardias/${m.user.id}/reporte?fecha=${filtro.iso}`
-                      }
+                      href={`/guardias/${m.user.id}/reporte${rango.queryString}`}
                       className="text-xs font-medium text-primary-700 hover:underline"
                     >
                       Ver →

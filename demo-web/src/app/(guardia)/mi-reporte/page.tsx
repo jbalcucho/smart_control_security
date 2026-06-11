@@ -63,7 +63,16 @@ export default async function MiReportePage() {
       turnoNombre: true,
       turnoInicio: true,
       turnoFin: true,
-      puesto: { select: { id: true, nombre: true, direccion: true } },
+      puesto: {
+        select: {
+          id: true,
+          nombre: true,
+          direccion: true,
+          latitud: true,
+          longitud: true,
+          radioGeofenceM: true,
+        },
+      },
     },
   });
   if (!guardia) return null;
@@ -141,11 +150,35 @@ export default async function MiReportePage() {
 
       <ReporteJornadaView
         data={{
-          guardia,
+          guardia: {
+            id: guardia.id,
+            nombre: guardia.nombre,
+            email: guardia.email,
+            turnoNombre: guardia.turnoNombre,
+            turnoInicio: guardia.turnoInicio,
+            turnoFin: guardia.turnoFin,
+            puesto: guardia.puesto
+              ? {
+                  id: guardia.puesto.id,
+                  nombre: guardia.puesto.nombre,
+                  direccion: guardia.puesto.direccion,
+                }
+              : null,
+          },
           fecha: fechaIso,
           reporte: serializeReporte(reporte),
           marcas: marcasSerial,
         }}
+        puestoCoords={
+          guardia.puesto
+            ? {
+                nombre: guardia.puesto.nombre,
+                latitud: guardia.puesto.latitud,
+                longitud: guardia.puesto.longitud,
+                radioGeofenceM: guardia.puesto.radioGeofenceM,
+              }
+            : null
+        }
       />
     </div>
   );

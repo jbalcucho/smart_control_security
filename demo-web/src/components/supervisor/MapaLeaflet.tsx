@@ -31,6 +31,11 @@ import {
 } from "react-leaflet";
 
 import { cn, formatDistance, formatRelative } from "@/lib/utils";
+import {
+  defForTipo,
+  pinHtmlForMarca,
+  type TipoMarca as TipoMarcaIcono,
+} from "@/components/shared/MarcaMapaIconos";
 
 import type {
   MapaSnapshot,
@@ -63,11 +68,25 @@ function pinHtml(color: string, label: string, pulse = false): string {
 }
 
 const ICON_PUESTO = makeIcon(pinHtml("#0284c7", "P"), 30);
-const ICON_MARCA_OK = makeIcon(pinHtml("#16a34a", "✓"), 26);
-const ICON_MARCA_FRAUDE = makeIcon(pinHtml("#dc2626", "✗"), 26);
 const ICON_NOVEDAD_PANICO = makeIcon(pinHtml("#dc2626", "🚨", true), 34);
 const ICON_NOVEDAD_REFUERZO = makeIcon(pinHtml("#ea580c", "👥"), 30);
 const ICON_NOVEDAD_GENERAL = makeIcon(pinHtml("#6b7280", "ℹ"), 28);
+
+// Cache de iconos de marca por (tipo|fraude) — el HTML se genera con la
+// convención compartida `pinHtmlForMarca` para que se vea igual en el
+// mapa global y en los modales individuales.
+const MARCA_ICON_CACHE = new Map<string, L.DivIcon>();
+function marcaIconCached(tipo: TipoMarcaIcono, esFraude: boolean): L.DivIcon {
+  const key = `${tipo}|${esFraude ? "fraude" : "ok"}`;
+  const cached = MARCA_ICON_CACHE.get(key);
+  if (cached) return cached;
+  const icon = makeIcon(
+    pinHtmlForMarca({ tipo, esFraude, size: 28 }),
+    28,
+  );
+  MARCA_ICON_CACHE.set(key, icon);
+  return icon;
+}
 
 // ============================================================
 // Helpers
@@ -84,14 +103,11 @@ function novedadIcon(n: NovedadMapa): L.DivIcon {
 }
 
 function marcaIcon(m: MarcaMapa): L.DivIcon {
-  return m.esFraude ? ICON_MARCA_FRAUDE : ICON_MARCA_OK;
+  return marcaIconCached(m.tipo as TipoMarcaIcono, m.esFraude);
 }
 
 function marcaTipoLabel(tipo: MarcaMapa["tipo"]): string {
-  if (tipo === "ENTRADA") return "Entrada";
-  if (tipo === "SALIDA") return "Salida";
-  if (tipo === "SALIDA_REFRIGERIO") return "🍽️ Sale refrig.";
-  return "✓ Regresa refrig.";
+  return defForTipo(tipo as TipoMarcaIcono).human;
 }
 
 // ============================================================
@@ -289,6 +305,9 @@ export function MapaLeaflet({ initial, pollMs = 10_000 }: MapaLeafletProps) {
       {/* Toggles de capas */}
       <LayerToggleBar layers={layers} onChange={setLayers} />
 
+      {/* Leyenda de iconos */}
+      <Leyenda />
+
       {/* Contenedor del mapa */}
       <div className="overflow-hidden rounded-2xl ring-1 ring-gray-200">
         <MapContainer
@@ -389,6 +408,55 @@ function KpiPill({
       {label}
       <span className="tabular-nums">{value}</span>
     </span>
+  );
+}
+
+function Leyenda() {
+  // Pequeño helper para reusar el HTML del pin como vista estática.
+  const tipos: TipoMarcaIcono[] = [
+    "ENTRADA",
+    "SALIDA",
+    "SALIDA_REFRIGERIO",
+    "ENTRADA_REFRIGERIO",
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl bg-white p-2 px-3 text-[11px] ring-1 ring-gray-200">
+      <span className="text-[10px] uppercase tracking-wide text-gray-500">
+        Leyenda:
+      </span>
+      {tipos.map((t) => {
+        const def = defForTipo(t);
+        return (
+          <span key={t} className="inline-flex items-center gap-1.5 text-gray-700">
+            <span
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold shadow"
+              style={{
+                background: def.color,
+                color:
+                  t === "SALIDA_REFRIGERIO" || t === "ENTRADA_REFRIGERIO"
+                    ? "#0a0a0a"
+                    : "#fff",
+              }}
+            >
+              {def.label}
+            </span>
+            {def.human}
+          </span>
+        );
+      })}
+      <span className="ml-2 inline-flex items-center gap-1.5 text-gray-700">
+        <span
+          className="relative inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold shadow"
+          style={{ background: "#16a34a", color: "#fff" }}
+        >
+          ▶
+          <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-danger-600 text-[8px] font-black text-white">
+            ✗
+          </span>
+        </span>
+        Fraude (borde rojo)
+      </span>
+    </div>
   );
 }
 

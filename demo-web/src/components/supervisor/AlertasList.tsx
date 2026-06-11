@@ -50,6 +50,8 @@ export interface AlertaListItem {
 interface AlertasListProps {
   initial: AlertaListItem[];
   pollMs?: number;
+  /** Query string para el fetch de polling (sin `?`). Vacío → "onlyPending=true". */
+  apiQueryString?: string;
 }
 
 // ============================================================
@@ -89,17 +91,29 @@ function googleMapsLink(lat: number, lng: number): string {
 // Componente
 // ============================================================
 
-export function AlertasList({ initial, pollMs = 5000 }: AlertasListProps) {
+export function AlertasList({
+  initial,
+  pollMs = 5000,
+  apiQueryString = "onlyPending=true",
+}: AlertasListProps) {
   const [alertas, setAlertas] = useState<AlertaListItem[]>(initial);
   const [lastFetchAt, setLastFetchAt] = useState<Date>(new Date());
   const [fetching, setFetching] = useState(false);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const knownIdsRef = useRef<Set<string>>(new Set(initial.map((a) => a.id)));
 
+  // Cuando cambia el filtro server-side (initial cambia), reseteamos el estado.
+  useEffect(() => {
+    setAlertas(initial);
+    knownIdsRef.current = new Set(initial.map((a) => a.id));
+    setHighlightedIds(new Set());
+  }, [initial]);
+
   const fetchAlertas = useCallback(async () => {
     setFetching(true);
     try {
-      const res = await fetch("/api/alertas?onlyPending=true", { cache: "no-store" });
+      const qs = apiQueryString ? `?${apiQueryString}` : "";
+      const res = await fetch(`/api/alertas${qs}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as AlertaListItem[];
 
@@ -126,9 +140,11 @@ export function AlertasList({ initial, pollMs = 5000 }: AlertasListProps) {
     } finally {
       setFetching(false);
     }
-  }, []);
+  }, [apiQueryString]);
 
   useEffect(() => {
+    // Cuando cambia `apiQueryString`, `fetchAlertas` se recrea (cambia su
+    // identidad), por lo que este efecto se re-ejecuta con el nuevo filtro.
     const id = setInterval(fetchAlertas, pollMs);
     return () => clearInterval(id);
   }, [fetchAlertas, pollMs]);
@@ -152,37 +168,28 @@ export function AlertasList({ initial, pollMs = 5000 }: AlertasListProps) {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Header con barra de estado del polling */}
-      <header className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Alertas pendientes</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            {alertas.length} sin atender{" "}
-            <span className="text-gray-400">
-              · Auto-refresh cada {Math.round(pollMs / 1000)}s
-              {fetching && " · actualizando…"}
-            </span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span
-            className={cn(
-              "inline-block h-2 w-2 rounded-full",
-              fetching ? "bg-primary-500 animate-pulse" : "bg-success-500",
-            )}
-            aria-hidden
-          />
-          Última: {lastFetchAt.toLocaleTimeString("es-CO", { hour12: false })}
-          <button
-            type="button"
-            onClick={fetchAlertas}
-            disabled={fetching}
-            className="ml-2 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Refrescar
-          </button>
-        </div>
-      </header>
+      {/* Barra de estado del polling (el título lo provee la página). */}
+      <div className="flex items-center justify-end gap-2 text-xs text-gray-500">
+        <span
+          className={cn(
+            "inline-block h-2 w-2 rounded-full",
+            fetching ? "bg-primary-500 animate-pulse" : "bg-success-500",
+          )}
+          aria-hidden
+        />
+        Última actualización: {lastFetchAt.toLocaleTimeString("es-CO", { hour12: false })}
+        <span className="text-gray-400">
+          · auto cada {Math.round(pollMs / 1000)}s
+        </span>
+        <button
+          type="button"
+          onClick={fetchAlertas}
+          disabled={fetching}
+          className="ml-2 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Refrescar
+        </button>
+      </div>
 
       {/* Mini KPIs */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

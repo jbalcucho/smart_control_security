@@ -13,6 +13,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { parseRango } from "@/lib/rango-fecha";
 import {
   calcularReporte,
   type Jornada,
@@ -45,35 +46,19 @@ function serializeReporte(r: ReporteJornada) {
   };
 }
 
-function parsearFecha(raw?: string): { iso: string; desde: Date; hasta: Date } {
-  const now = new Date();
-  let ref: Date;
-  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    ref = new Date(`${raw}T00:00:00`);
-    if (Number.isNaN(ref.getTime())) ref = now;
-  } else {
-    ref = now;
-  }
-  const desde = new Date(ref);
-  desde.setHours(0, 0, 0, 0);
-  const hasta = new Date(ref);
-  hasta.setHours(23, 59, 59, 999);
-  return { iso: desde.toISOString().slice(0, 10), desde, hasta };
-}
-
 export default async function ReporteGuardiaPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ fecha?: string }>;
+  searchParams: Promise<{ fecha?: string; desde?: string; hasta?: string }>;
 }) {
   const session = await auth();
   if (!session?.user) redirect("/");
   if (session.user.rol === "GUARDIA") redirect("/home");
 
   const { id } = await params;
-  const { fecha } = await searchParams;
+  const sp = await searchParams;
 
   const guardia = await prisma.user.findUnique({
     where: { id },
@@ -85,13 +70,27 @@ export default async function ReporteGuardiaPage({
       turnoNombre: true,
       turnoInicio: true,
       turnoFin: true,
-      puesto: { select: { id: true, nombre: true, direccion: true } },
+      puesto: {
+        select: {
+          id: true,
+          nombre: true,
+          direccion: true,
+          latitud: true,
+          longitud: true,
+          radioGeofenceM: true,
+        },
+      },
     },
   });
 
   if (!guardia || guardia.rol !== "GUARDIA") notFound();
 
-  const { iso, desde, hasta } = parsearFecha(fecha);
+  const rango = parseRango(sp, { defaultMode: "hoy" });
+  // Para el reporte siempre necesitamos un rango (no acepta "todas" porque
+  // sin límite no tiene sentido emparejar jornadas). Si vino "todas",
+  // forzamos al día de hoy.
+  const desde = rango.desde ?? (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+  const hasta = rango.hasta ?? (() => { const d = new Date(); d.setHours(23,59,59,999); return d; })();
 
   const marcas = await prisma.marca.findMany({
     where: {
@@ -160,18 +159,43 @@ export default async function ReporteGuardiaPage({
 
       <FechaSelector
         basePath={`/guardias/${id}/reporte`}
-        fechaActual={iso}
-        diasHaciaAtras={6}
+        rangoActual={rango}
+        incluirTodas={false}
       />
 
       <ReporteJornadaView
         data={{
-          guardia,
-          fecha: iso,
+          guardia: {
+            id: guardia.id,
+            nombre: guardia.nombre,
+            email: guardia.email,
+            turnoNombre: guardia.turnoNombre,
+            turnoInicio: guardia.turnoInicio,
+            turnoFin: guardia.turnoFin,
+            puesto: guardia.puesto
+              ? {
+                  id: guardia.puesto.id,
+                  nombre: guardia.puesto.nombre,
+                  direccion: guardia.puesto.direccion,
+                }
+              : null,
+          },
+          fecha: rango.desdeIso ?? "",
+          fechaLabel: rango.label,
           reporte: serializeReporte(reporte),
           marcas: marcasSerial,
         }}
         mostrarPerfil
+        puestoCoords={
+          guardia.puesto
+            ? {
+                nombre: guardia.puesto.nombre,
+                latitud: guardia.puesto.latitud,
+                longitud: guardia.puesto.longitud,
+                radioGeofenceM: guardia.puesto.radioGeofenceM,
+              }
+            : null
+        }
       />
     </div>
   );

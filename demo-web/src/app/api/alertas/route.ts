@@ -2,12 +2,16 @@
  * API: /api/alertas
  *
  * GET → lista alertas. Solo supervisor/admin.
+ * Acepta los mismos filtros que la página /alertas (rango + incluirResueltas)
+ * para que el polling no rompa la vista filtrada.
  */
 
 import { NextResponse, type NextRequest } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { parseRango } from "@/lib/rango-fecha";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -19,10 +23,28 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const onlyPending = searchParams.get("onlyPending") === "true";
+  // Compat con el AlertasList anterior (onlyPending=true).
+  const onlyPending =
+    searchParams.get("onlyPending") === "true" ||
+    searchParams.get("incluirResueltas") !== "true";
+
+  const rango = parseRango(
+    {
+      fecha: searchParams.get("fecha") ?? undefined,
+      desde: searchParams.get("desde") ?? undefined,
+      hasta: searchParams.get("hasta") ?? undefined,
+    },
+    { defaultMode: "todas" },
+  );
+
+  const where: Prisma.AlertaWhereInput = {};
+  if (onlyPending) where.resuelta = false;
+  if (rango.desde && rango.hasta) {
+    where.createdAt = { gte: rango.desde, lte: rango.hasta };
+  }
 
   const alertas = await prisma.alerta.findMany({
-    where: onlyPending ? { resuelta: false } : {},
+    where,
     include: {
       marca: { include: { user: true, puesto: true } },
       novedad: {
@@ -33,7 +55,7 @@ export async function GET(request: NextRequest) {
       },
     },
     orderBy: [{ severidad: "desc" }, { createdAt: "desc" }],
-    take: 100,
+    take: 200,
   });
 
   return NextResponse.json(alertas);
