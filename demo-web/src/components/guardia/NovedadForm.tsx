@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
+import { AutoRedirect } from "@/components/shared/AutoRedirect";
 import { cn } from "@/lib/utils";
 
 // ============================================================
@@ -251,6 +252,8 @@ export function NovedadForm({ puesto }: NovedadFormProps) {
             Nueva novedad
           </button>
         </div>
+
+        <AutoRedirect to="/home" delayMs={2500} />
       </div>
     );
   }

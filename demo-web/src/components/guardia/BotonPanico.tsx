@@ -19,8 +19,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const COUNTDOWN_SEC = 3;
+// Tras el éxito, dejamos el banner visible 4s para que el guardia lea la
+// confirmación con calma; luego volvemos al menú principal del /home.
+const SUCCESS_AUTO_RESET_MS = 4000;
 
 type State =
   | { kind: "idle" }
@@ -30,12 +34,23 @@ type State =
   | { kind: "error"; message: string };
 
 export function BotonPanico() {
+  const router = useRouter();
   const [state, setState] = useState<State>({ kind: "idle" });
   const gpsRef = useRef<{ latitud: number; longitud: number; precisionM: number } | null>(
     null,
   );
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-reset al menú principal tras un envío exitoso.
+  useEffect(() => {
+    if (state.kind !== "success") return;
+    const t = setTimeout(() => {
+      setState({ kind: "idle" });
+      router.refresh();
+    }, SUCCESS_AUTO_RESET_MS);
+    return () => clearTimeout(t);
+  }, [state.kind, router]);
 
   // ----------------------------------------------------------
   // Limpieza

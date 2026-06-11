@@ -16,7 +16,10 @@ import {
   type Jornada,
   type ReporteJornada,
 } from "@/lib/reporte-jornada";
-import { ReporteJornadaView } from "@/components/shared/ReporteJornadaView";
+import {
+  ReporteJornadaView,
+  type MarcaSerialized,
+} from "@/components/shared/ReporteJornadaView";
 
 // Serializa fechas (Date → string) para pasar a un client component sin perder
 // el tipo. Idéntico shape al que devuelve /api/guardias/[id]/reporte.
@@ -97,6 +100,18 @@ export default async function MiReportePage() {
   });
 
   const fechaIso = desde.toISOString().slice(0, 10);
+  const marcasSerial: MarcaSerialized[] = marcas.map((m) => ({
+    id: m.id,
+    tipo: m.tipo,
+    timestampServidor: m.timestampServidor.toISOString(),
+    latitud: m.latitud,
+    longitud: m.longitud,
+    precisionM: m.precisionM,
+    distanciaPuestoM: m.distanciaPuestoM,
+    dentroDelGeofence: m.dentroDelGeofence,
+    esFraude: m.esFraude,
+    fotoUrl: m.fotoUrl,
+  }));
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -125,7 +140,12 @@ export default async function MiReportePage() {
       </header>
 
       <ReporteJornadaView
-        data={{ guardia, fecha: fechaIso, reporte: serializeReporte(reporte) }}
+        data={{
+          guardia,
+          fecha: fechaIso,
+          reporte: serializeReporte(reporte),
+          marcas: marcasSerial,
+        }}
       />
     </div>
   );

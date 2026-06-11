@@ -1,8 +1,8 @@
 /**
  * Dashboard del Supervisor.
  *
- * Estado: PLACEHOLDER — se implementará en Sprint Demo 4.
- * Mostrará: KPIs + tabla de últimas marcas con polling de 5s.
+ * Acepta ?fecha=YYYY-MM-DD (default: hoy) o ?fecha=todas (sin filtro de día).
+ * Cuando hay día seleccionado, las queries y la tabla se limitan a ese día.
  */
 
 import Link from "next/link";
@@ -10,9 +10,45 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { estadoDesdeUltimaMarca } from "@/lib/estado-guardia";
 import { formatDistance, formatDateTime } from "@/lib/utils";
+import { FechaSelector } from "@/components/shared/FechaSelector";
+import type { Prisma } from "@prisma/client";
 
-// Cuenta cuántos guardias activos están actualmente en refrigerio.
-// Se basa en la última marca del día de cada guardia.
+// ------------------------------------------------------------
+// Parseo de filtro de fecha
+// ------------------------------------------------------------
+
+interface FiltroDia {
+  /** "todas" si no hay filtro, o "YYYY-MM-DD". */
+  iso: string;
+  /** undefined cuando es "todas" (sin filtro de tiempo). */
+  rango: { gte: Date; lte: Date } | undefined;
+  label: string;
+}
+
+function parsearFiltro(raw: string | undefined): FiltroDia {
+  if (raw === "todas") {
+    return { iso: "todas", rango: undefined, label: "Periodo completo" };
+  }
+  const refRaw = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  const hoyIso = new Date().toISOString().slice(0, 10);
+  const iso = refRaw ?? hoyIso;
+  const ref = new Date(`${iso}T00:00:00`);
+  const desde = new Date(ref);
+  desde.setHours(0, 0, 0, 0);
+  const hasta = new Date(ref);
+  hasta.setHours(23, 59, 59, 999);
+  const esHoy = iso === hoyIso;
+  const label = esHoy
+    ? "Hoy"
+    : ref.toLocaleDateString("es-CO", {
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+      });
+  return { iso, rango: { gte: desde, lte: hasta }, label };
+}
+
+// "En refrigerio" es siempre "ahora mismo" (no se filtra por fecha histórica).
 async function contarEnRefrigerio(): Promise<number> {
   const inicioHoy = new Date();
   inicioHoy.setHours(0, 0, 0, 0);
@@ -37,7 +73,36 @@ async function contarEnRefrigerio(): Promise<number> {
   return total;
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ fecha?: string }>;
+}) {
+  const { fecha } = await searchParams;
+  const filtro = parsearFiltro(fecha);
+
+  // Filtros condicionales para Prisma según haya rango de fecha o no.
+  const whereMarca: Prisma.MarcaWhereInput = filtro.rango
+    ? { timestampServidor: filtro.rango }
+    : {};
+  const whereMarcaFraude: Prisma.MarcaWhereInput = {
+    ...whereMarca,
+    esFraude: true,
+  };
+  const whereAlerta: Prisma.AlertaWhereInput = filtro.rango
+    ? { resuelta: false, createdAt: filtro.rango }
+    : { resuelta: false };
+  const whereNovedadPend: Prisma.NovedadWhereInput = filtro.rango
+    ? { estado: "PENDIENTE", timestampServidor: filtro.rango }
+    : { estado: "PENDIENTE" };
+  const whereNovedadPanico: Prisma.NovedadWhereInput = filtro.rango
+    ? {
+        estado: "PENDIENTE",
+        tipo: "PANICO",
+        timestampServidor: filtro.rango,
+      }
+    : { estado: "PENDIENTE", tipo: "PANICO" };
+
   const [
     totalMarcas,
     totalFraudes,
@@ -47,13 +112,14 @@ export default async function DashboardPage() {
     enRefrigerio,
     marcas,
   ] = await Promise.all([
-    prisma.marca.count(),
-    prisma.marca.count({ where: { esFraude: true } }),
-    prisma.alerta.count({ where: { resuelta: false } }),
-    prisma.novedad.count({ where: { estado: "PENDIENTE" } }),
-    prisma.novedad.count({ where: { estado: "PENDIENTE", tipo: "PANICO" } }),
+    prisma.marca.count({ where: whereMarca }),
+    prisma.marca.count({ where: whereMarcaFraude }),
+    prisma.alerta.count({ where: whereAlerta }),
+    prisma.novedad.count({ where: whereNovedadPend }),
+    prisma.novedad.count({ where: whereNovedadPanico }),
     contarEnRefrigerio(),
     prisma.marca.findMany({
+      where: whereMarca,
       include: { user: true, puesto: true, alerta: true },
       orderBy: { timestampServidor: "desc" },
       take: 20,
@@ -65,25 +131,36 @@ export default async function DashboardPage() {
       <header>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <p className="mt-1 text-sm text-gray-600">
-          Resumen general de marcas y alertas
+          <span className="font-medium capitalize">{filtro.label}</span> · marcas
+          y alertas del periodo seleccionado
         </p>
       </header>
+
+      <FechaSelector
+        basePath="/dashboard"
+        fechaActual={filtro.iso}
+        incluirTodas
+      />
 
       {/* KPIs */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="card">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Marcas totales</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500">Marcas</p>
           <p className="mt-2 text-3xl font-bold text-gray-900">{totalMarcas}</p>
         </div>
 
         <div className="card">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Fraudes detectados</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500">Fraudes</p>
           <p className="mt-2 text-3xl font-bold text-danger-600">{totalFraudes}</p>
         </div>
 
         <div className="card">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Alertas pendientes</p>
-          <p className="mt-2 text-3xl font-bold text-warning-600">{totalAlertasPendientes}</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500">
+            Alertas pendientes
+          </p>
+          <p className="mt-2 text-3xl font-bold text-warning-600">
+            {totalAlertasPendientes}
+          </p>
         </div>
 
         <Link
@@ -94,8 +171,8 @@ export default async function DashboardPage() {
           }
           title="Ver guardias y sus reportes"
         >
-          <p className="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-1">
-            <span aria-hidden>🍽️</span> En refrigerio
+          <p className="flex items-center gap-1 text-xs uppercase tracking-wide text-gray-500">
+            <span aria-hidden>🍽️</span> En refrigerio (ahora)
           </p>
           <p
             className={
@@ -134,7 +211,7 @@ export default async function DashboardPage() {
               : "card"
           }
         >
-          <p className="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-1">
+          <p className="flex items-center gap-1 text-xs uppercase tracking-wide text-gray-500">
             <span aria-hidden>🚨</span> Pánico activo
           </p>
           <p
@@ -151,7 +228,9 @@ export default async function DashboardPage() {
       {/* Tabla de últimas marcas */}
       <div className="card overflow-x-auto">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Últimas 20 marcas</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            Últimas marcas del periodo
+          </h2>
           <Link
             href="/guardias"
             className="text-xs font-medium text-primary-700 hover:underline"
@@ -161,7 +240,9 @@ export default async function DashboardPage() {
         </div>
 
         {marcas.length === 0 ? (
-          <p className="text-sm text-gray-500">No hay marcas todavía.</p>
+          <p className="text-sm text-gray-500">
+            No hay marcas en el periodo seleccionado.
+          </p>
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -183,7 +264,9 @@ export default async function DashboardPage() {
                   <td className="py-3">
                     <TipoMarcaBadge tipo={m.tipo} />
                   </td>
-                  <td className="py-3 tabular-nums">{formatDistance(m.distanciaPuestoM)}</td>
+                  <td className="py-3 tabular-nums">
+                    {formatDistance(m.distanciaPuestoM)}
+                  </td>
                   <td className="py-3">
                     {m.esFraude ? (
                       <span className="rounded-full bg-danger-100 px-2 py-0.5 text-xs font-medium text-danger-700">
@@ -200,7 +283,11 @@ export default async function DashboardPage() {
                   </td>
                   <td className="py-3 text-right">
                     <Link
-                      href={`/guardias/${m.user.id}/reporte`}
+                      href={
+                        filtro.iso === "todas"
+                          ? `/guardias/${m.user.id}/reporte`
+                          : `/guardias/${m.user.id}/reporte?fecha=${filtro.iso}`
+                      }
                       className="text-xs font-medium text-primary-700 hover:underline"
                     >
                       Ver →
@@ -211,7 +298,6 @@ export default async function DashboardPage() {
             </tbody>
           </table>
         )}
-
       </div>
     </div>
   );

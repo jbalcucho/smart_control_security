@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
+import { AutoRedirect } from "@/components/shared/AutoRedirect";
 import { CameraCapture } from "./CameraCapture";
 import { distanceInMeters } from "@/lib/geofence";
 import { cn, formatDistance } from "@/lib/utils";
@@ -762,9 +763,22 @@ function ResultStep({ marca, photo, onNewMarca }: ResultStepProps) {
           Nueva marca
         </button>
       </div>
-      <Link href="/home" className="block text-center text-sm text-gray-500 underline">
-        Volver al inicio
-      </Link>
+
+      {/*
+        Auto-redirect al /home si la marca fue válida (sin fraude).
+        Si hubo fraude, NO auto-redirigimos: el guardia debe ver y leer la
+        alerta antes de salir.
+      */}
+      {fueValida ? (
+        <AutoRedirect to="/home" delayMs={3500} />
+      ) : (
+        <Link
+          href="/home"
+          className="block text-center text-sm text-gray-500 underline"
+        >
+          Volver al inicio
+        </Link>
+      )}
     </div>
   );
 }

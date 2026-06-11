@@ -16,10 +16,12 @@
  *   - El usuario ve un spinner durante el envío y una confirmación efímera.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { formatDuration } from "@/lib/reporte-jornada";
+
+const SUCCESS_AUTO_RESET_MS = 2200;
 
 type Variante = "salida" | "regreso";
 
@@ -80,6 +82,19 @@ export function BotonRefrigerio({
   const router = useRouter();
   const [state, setState] = useState<State>({ kind: "idle" });
 
+  // Tras un éxito breve, devolvemos al guardia al "menú principal" del /home:
+  // refrescamos los Server Components (re-deriva el estado actual y reorganiza
+  // las acciones disponibles) y reseteamos el botón a idle. Como ya estamos
+  // dentro de /home no hace falta router.push.
+  useEffect(() => {
+    if (state.kind !== "success") return;
+    const t = setTimeout(() => {
+      setState({ kind: "idle" });
+      router.refresh();
+    }, SUCCESS_AUTO_RESET_MS);
+    return () => clearTimeout(t);
+  }, [state.kind, router]);
+
   const enviar = useCallback(async () => {
     setState({ kind: "sending" });
 
@@ -110,13 +125,14 @@ export function BotonRefrigerio({
           ? Date.now() - new Date(refrigerioDesde).getTime()
           : null;
       setState({ kind: "success", duracionMs });
-      // Refresca el home para que las acciones cambien al nuevo estado.
-      router.refresh();
+      // Nota: el router.refresh() lo hace el useEffect tras 2.2s para que el
+      // guardia alcance a ver el banner de éxito antes de que las acciones
+      // del /home se reorganicen al nuevo estado.
     } catch (e) {
       const message = e instanceof Error ? e.message : "Error desconocido";
       setState({ kind: "error", message });
     }
-  }, [variante, fallbackLat, fallbackLng, refrigerioDesde, router]);
+  }, [variante, fallbackLat, fallbackLng, refrigerioDesde]);
 
   // ----------------------------------------------------------
   // Render

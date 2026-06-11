@@ -20,7 +20,11 @@ import {
   type Refrigerio,
   type ReporteJornada,
 } from "@/lib/reporte-jornada";
-import { ReporteJornadaView } from "@/components/shared/ReporteJornadaView";
+import {
+  ReporteJornadaView,
+  type MarcaSerialized,
+} from "@/components/shared/ReporteJornadaView";
+import { FechaSelector } from "@/components/shared/FechaSelector";
 
 function serializeReporte(r: ReporteJornada) {
   return {
@@ -55,23 +59,6 @@ function parsearFecha(raw?: string): { iso: string; desde: Date; hasta: Date } {
   const hasta = new Date(ref);
   hasta.setHours(23, 59, 59, 999);
   return { iso: desde.toISOString().slice(0, 10), desde, hasta };
-}
-
-function diasAlrededor(centro: Date, n: number): { iso: string; label: string }[] {
-  const out: { iso: string; label: string }[] = [];
-  for (let i = n; i >= -n; i--) {
-    const d = new Date(centro);
-    d.setDate(d.getDate() - i);
-    out.push({
-      iso: d.toISOString().slice(0, 10),
-      label: d.toLocaleDateString("es-CO", {
-        weekday: "short",
-        day: "2-digit",
-        month: "short",
-      }),
-    });
-  }
-  return out;
 }
 
 export default async function ReporteGuardiaPage({
@@ -132,8 +119,18 @@ export default async function ReporteGuardiaPage({
     ahora: new Date(),
   });
 
-  const dias = diasAlrededor(new Date(`${iso}T12:00:00`), 3);
-  const hoyIso = new Date().toISOString().slice(0, 10);
+  const marcasSerial: MarcaSerialized[] = marcas.map((m) => ({
+    id: m.id,
+    tipo: m.tipo,
+    timestampServidor: m.timestampServidor.toISOString(),
+    latitud: m.latitud,
+    longitud: m.longitud,
+    precisionM: m.precisionM,
+    distanciaPuestoM: m.distanciaPuestoM,
+    dentroDelGeofence: m.dentroDelGeofence,
+    esFraude: m.esFraude,
+    fotoUrl: m.fotoUrl,
+  }));
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -161,36 +158,19 @@ export default async function ReporteGuardiaPage({
         </div>
       </header>
 
-      {/* Selector de día (pills navegables) */}
-      <nav className="card flex flex-wrap items-center gap-2 overflow-x-auto">
-        <span className="text-[10px] uppercase tracking-wide text-gray-500">
-          Fecha:
-        </span>
-        {dias.map((d) => {
-          const activo = d.iso === iso;
-          const esHoy = d.iso === hoyIso;
-          return (
-            <Link
-              key={d.iso}
-              href={`/guardias/${id}/reporte?fecha=${d.iso}`}
-              className={
-                "rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors " +
-                (activo
-                  ? "bg-primary-600 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200")
-              }
-            >
-              {d.label}
-              {esHoy && !activo && (
-                <span className="ml-1 text-[9px] text-primary-700">hoy</span>
-              )}
-            </Link>
-          );
-        })}
-      </nav>
+      <FechaSelector
+        basePath={`/guardias/${id}/reporte`}
+        fechaActual={iso}
+        diasHaciaAtras={6}
+      />
 
       <ReporteJornadaView
-        data={{ guardia, fecha: iso, reporte: serializeReporte(reporte) }}
+        data={{
+          guardia,
+          fecha: iso,
+          reporte: serializeReporte(reporte),
+          marcas: marcasSerial,
+        }}
         mostrarPerfil
       />
     </div>
