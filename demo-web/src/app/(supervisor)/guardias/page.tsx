@@ -9,14 +9,23 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { estadoDesdeUltimaMarca, type EstadoGuardia } from "@/lib/estado-guardia";
+import { parseRango } from "@/lib/rango-fecha";
+import { FechaSelector } from "@/components/shared/FechaSelector";
 import {
   GuardiasAdminTable,
   type GuardiaRow,
 } from "@/components/supervisor/GuardiasAdminTable";
 
-export default async function GuardiasPage() {
+export default async function GuardiasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ fecha?: string; desde?: string; hasta?: string }>;
+}) {
   const session = await auth();
   if (!session?.user) return null;
+
+  const sp = await searchParams;
+  const rango = parseRango(sp, { defaultMode: "hoy" });
 
   const inicioHoy = new Date();
   inicioHoy.setHours(0, 0, 0, 0);
@@ -79,16 +88,46 @@ export default async function GuardiasPage() {
     >,
   );
 
+  // Para evitar duplicar el query string si el usuario seleccionó "todas"
+  // (que no aplica al export), forzamos un fallback a hoy en ese caso.
+  const exportQs = rango.queryString || `?fecha=${new Date().toISOString().slice(0, 10)}`;
+
   return (
     <div className="space-y-4 animate-fade-in">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-900">Administrar guardias</h1>
-        <p className="mt-1 text-sm text-gray-600">
-          Crea, edita, asigna a un puesto y consulta el reporte de cada guardia.
-          También puedes borrar el historial transaccional para preparar la
-          cuenta antes de una demo.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Administrar guardias</h1>
+          <p className="mt-1 text-sm text-gray-600">
+            Crea, edita, asigna a un puesto y consulta el reporte de cada guardia.
+            También puedes borrar el historial transaccional para preparar la
+            cuenta antes de una demo.
+          </p>
+        </div>
+        <a
+          href={`/api/reportes/consolidado${exportQs}`}
+          download
+          className="inline-flex items-center gap-1.5 rounded-lg bg-success-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-success-700"
+          title="Descargar CSV con horas turno / refrigerios / efectivo por guardia"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"
+            />
+          </svg>
+          Exportar consolidado ({rango.label})
+        </a>
       </header>
+
+      <FechaSelector basePath="/guardias" rangoActual={rango} incluirTodas={false} />
 
       <section className="grid grid-cols-3 gap-2">
         <KpiPill label="En turno" value={contadores.EN_TURNO} tone="primary" />

@@ -133,7 +133,7 @@ export default async function ReporteGuardiaPage({
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <header className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center gap-3">
         <Link
           href="/guardias"
           className="flex h-9 w-9 items-center justify-center rounded-full text-gray-600 hover:bg-gray-200"
@@ -149,12 +149,34 @@ export default async function ReporteGuardiaPage({
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-xl font-bold text-gray-900">Reporte de jornada</h1>
           <p className="text-xs text-gray-500">
             Refrigerios y horas efectivas — uso para auditoría / facturación
           </p>
         </div>
+        <a
+          href={`/api/guardias/${id}/reporte/export${rango.queryString}`}
+          download
+          className="inline-flex items-center gap-1.5 rounded-lg bg-success-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-success-700"
+          title="Descargar el reporte como CSV (abre en Excel)"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"
+            />
+          </svg>
+          Exportar CSV
+        </a>
       </header>
 
       <FechaSelector
