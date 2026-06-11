@@ -61,6 +61,10 @@ const credentialsSchema = z.object({
 // ------------------------------------------------------------
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  // NextAuth v5 prefiere AUTH_SECRET; aceptamos NEXTAUTH_SECRET por compatibilidad.
+  // Hacerlo explicito evita el "MissingSecret" en entornos serverless.
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+
   pages: {
     signIn: "/",
   },
