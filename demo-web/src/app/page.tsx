@@ -78,18 +78,17 @@ export default function LoginPage() {
       />
 
       <div className="relative w-full max-w-md">
-        {/* Logo / Brand — el logo va dentro de un disco blanco para
-            destacar sobre el fondo oscuro (el JPEG trae su propio borde negro). */}
+        {/* Logo / Brand — el PNG tiene fondo transparente, así que el
+            escudo se ve limpio sobre el gradient oscuro. Halo dorado sutil
+            detrás para darle peso visual sin opacar el logo. */}
         <div className="mb-8 text-center">
           <div className="relative mx-auto mb-5 inline-flex">
-            {/* Halo dorado decorativo */}
             <div
-              className="absolute inset-0 -m-2 rounded-full bg-accent-400/30 blur-xl"
+              className="absolute inset-0 -m-6 rounded-full bg-accent-400/20 blur-2xl"
               aria-hidden
             />
-            {/* Placa blanca con ring dorado */}
-            <div className="relative flex h-36 w-36 items-center justify-center rounded-full bg-white p-3 shadow-2xl ring-4 ring-accent-400/80">
-              <Logo size="xl" priority className="rounded-full" />
+            <div className="relative">
+              <Logo size="xl" priority />
             </div>
           </div>
           <h1 className="text-3xl font-bold text-white">Scorpions D.L.</h1>
