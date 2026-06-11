@@ -78,13 +78,22 @@ export default function LoginPage() {
       />
 
       <div className="relative w-full max-w-md">
-        {/* Logo / Brand */}
+        {/* Logo / Brand — el logo va dentro de un disco blanco para
+            destacar sobre el fondo oscuro (el JPEG trae su propio borde negro). */}
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 inline-flex">
-            <Logo size="xl" priority />
+          <div className="relative mx-auto mb-5 inline-flex">
+            {/* Halo dorado decorativo */}
+            <div
+              className="absolute inset-0 -m-2 rounded-full bg-accent-400/30 blur-xl"
+              aria-hidden
+            />
+            {/* Placa blanca con ring dorado */}
+            <div className="relative flex h-36 w-36 items-center justify-center rounded-full bg-white p-3 shadow-2xl ring-4 ring-accent-400/80">
+              <Logo size="xl" priority className="rounded-full" />
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-white">Scorpions D.L.</h1>
-          <p className="mt-0.5 text-sm font-semibold uppercase tracking-[0.3em] text-accent-400">
+          <h1 className="text-3xl font-bold text-white">Scorpions D.L.</h1>
+          <p className="mt-1 text-sm font-semibold uppercase tracking-[0.3em] text-accent-400">
             Private Security
           </p>
           <p className="mt-3 text-sm text-gray-300">
