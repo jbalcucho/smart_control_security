@@ -15,24 +15,48 @@ export type LoginInput = z.infer<typeof loginSchema>;
  * Validación del payload para crear una marca.
  * Lo envía el guardia desde el browser.
  *
+ * - ENTRADA y SALIDA (inicio/fin de turno) requieren `fotoBase64` (selfie).
+ * - SALIDA_REFRIGERIO y ENTRADA_REFRIGERIO son taps rápidos: solo GPS, sin selfie.
+ *
  * `fotoBase64` es una data URL del tipo "data:image/jpeg;base64,...."
  * generada por canvas.toDataURL() en el cliente.
  */
-export const crearMarcaSchema = z.object({
-  tipo: z.enum(["ENTRADA", "SALIDA"]),
-  latitud: z.number().min(-90).max(90),
-  longitud: z.number().min(-180).max(180),
-  precisionM: z.number().positive(),
-  timestampCliente: z.string().datetime(),
-  fotoBase64: z
-    .string()
-    .regex(/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/, {
-      message: "fotoBase64 debe ser una data URL de imagen válida",
-    })
-    // Límite ~1.5 MB en base64 (~1 MB binario): suficiente para selfies
-    // comprimidas a 640x480 con calidad 0.7 (~50-80 KB típico).
-    .max(1_500_000, "La foto es demasiado grande (máx 1.5 MB)"),
-});
+export const crearMarcaSchema = z
+  .object({
+    tipo: z.enum([
+      "ENTRADA",
+      "SALIDA",
+      "SALIDA_REFRIGERIO",
+      "ENTRADA_REFRIGERIO",
+    ]),
+    latitud: z.number().min(-90).max(90),
+    longitud: z.number().min(-180).max(180),
+    precisionM: z.number().positive(),
+    timestampCliente: z.string().datetime(),
+    fotoBase64: z
+      .string()
+      .regex(/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/, {
+        message: "fotoBase64 debe ser una data URL de imagen válida",
+      })
+      // Límite ~1.5 MB en base64 (~1 MB binario): suficiente para selfies
+      // comprimidas a 640x480 con calidad 0.7 (~50-80 KB típico).
+      .max(1_500_000, "La foto es demasiado grande (máx 1.5 MB)")
+      .optional(),
+  })
+  .refine(
+    (data) => {
+      // Refrigerios: foto opcional (puede venir o no).
+      // Turno (ENTRADA / SALIDA): selfie obligatoria.
+      const esRefrigerio =
+        data.tipo === "SALIDA_REFRIGERIO" || data.tipo === "ENTRADA_REFRIGERIO";
+      if (esRefrigerio) return true;
+      return typeof data.fotoBase64 === "string" && data.fotoBase64.length > 0;
+    },
+    {
+      message: "La selfie es obligatoria para marcar entrada/salida de turno",
+      path: ["fotoBase64"],
+    },
+  );
 
 export type CrearMarcaInput = z.infer<typeof crearMarcaSchema>;
 

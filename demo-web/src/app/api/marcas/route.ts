@@ -10,11 +10,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { obtenerEstadoGuardia, validarTransicion } from "@/lib/estado-guardia";
 import { prisma } from "@/lib/prisma";
 import { validateGeofence } from "@/lib/geofence";
 import { uploadMarcaFotoFromDataUrl } from "@/lib/s3";
 import { crearMarcaSchema } from "@/lib/validations";
-import { TipoAlerta, Severidad } from "@prisma/client";
+import { TipoAlerta, Severidad, type TipoMarca } from "@prisma/client";
+
+/** Tipos de marca que corresponden a refrigerio (no a inicio/fin de turno). */
+function esRefrigerio(tipo: TipoMarca): boolean {
+  return tipo === "SALIDA_REFRIGERIO" || tipo === "ENTRADA_REFRIGERIO";
+}
 
 // ============================================================
 // GET: listado de marcas (con filtros)
@@ -100,8 +106,22 @@ export async function POST(request: NextRequest) {
     );
   }
   const puesto = guardia.puesto;
+  const esRef = esRefrigerio(tipo);
 
-  // ---------- 4. Validación de geofence (server-side, no se confía en el cliente) ----------
+  // ---------- 3b. Validar transición de estado ----------
+  // (ej. no permitir SALIDA_REFRIGERIO si no estás en turno, etc.)
+  const { estado: estadoActual } = await obtenerEstadoGuardia(session.user.id);
+  const motivoTransicion = validarTransicion(estadoActual, tipo);
+  if (motivoTransicion) {
+    return NextResponse.json(
+      { error: motivoTransicion, estadoActual },
+      { status: 409 },
+    );
+  }
+
+  // ---------- 4. Validación de geofence ----------
+  // Para refrigerio NO marcamos fraude (es esperado que salga del puesto);
+  // solo registramos distancia/dentroDelGeofence con fines de auditoría.
   const { dentroDelGeofence, distanciaM, motivoFraude } = validateGeofence(
     latitud,
     longitud,
@@ -109,22 +129,34 @@ export async function POST(request: NextRequest) {
     puesto.longitud,
     puesto.radioGeofenceM,
   );
+  const esFraude = esRef ? false : !dentroDelGeofence;
+  const motivoFraudeFinal = esRef ? null : motivoFraude;
 
-  // ---------- 5. Subir foto (S3 o inline según config) ----------
-  let upload;
-  try {
-    upload = await uploadMarcaFotoFromDataUrl(session.user.id, fotoBase64);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Error subiendo la foto";
-    return NextResponse.json(
-      { error: `No se pudo guardar la foto: ${message}` },
-      { status: 500 },
-    );
+  // ---------- 5. Subir foto (solo si vino) ----------
+  // Refrigerios pueden venir sin selfie → fotoUrl/fotoKey quedan en null.
+  let fotoUrl: string | null = null;
+  let fotoKey: string | null = null;
+  let storage: "s3" | "inline" | "none" = "none";
+  if (fotoBase64) {
+    try {
+      const upload = await uploadMarcaFotoFromDataUrl(
+        session.user.id,
+        fotoBase64,
+      );
+      fotoUrl = upload.url;
+      fotoKey = upload.key;
+      storage = upload.storage;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Error subiendo la foto";
+      return NextResponse.json(
+        { error: `No se pudo guardar la foto: ${message}` },
+        { status: 500 },
+      );
+    }
   }
 
   // ---------- 6. Crear la marca (+ alerta si aplica) en una transacción ----------
   const userAgent = request.headers.get("user-agent") ?? null;
-  const esFraude = !dentroDelGeofence;
 
   const marca = await prisma.$transaction(async (tx) => {
     const created = await tx.marca.create({
@@ -132,15 +164,15 @@ export async function POST(request: NextRequest) {
         userId: session.user.id,
         puestoId: puesto.id,
         tipo,
-        fotoUrl: upload.url,
-        fotoKey: upload.key,
+        fotoUrl,
+        fotoKey,
         latitud,
         longitud,
         precisionM,
         distanciaPuestoM: distanciaM,
         dentroDelGeofence,
         esFraude,
-        motivoFraude,
+        motivoFraude: motivoFraudeFinal,
         timestampCliente: new Date(timestampCliente),
         userAgent,
       },
@@ -178,7 +210,7 @@ export async function POST(request: NextRequest) {
           nombre: puesto.nombre,
           radioGeofenceM: puesto.radioGeofenceM,
         },
-        storage: upload.storage,
+        storage,
       },
     },
     { status: 201 },

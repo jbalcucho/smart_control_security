@@ -87,6 +87,13 @@ function marcaIcon(m: MarcaMapa): L.DivIcon {
   return m.esFraude ? ICON_MARCA_FRAUDE : ICON_MARCA_OK;
 }
 
+function marcaTipoLabel(tipo: MarcaMapa["tipo"]): string {
+  if (tipo === "ENTRADA") return "Entrada";
+  if (tipo === "SALIDA") return "Salida";
+  if (tipo === "SALIDA_REFRIGERIO") return "🍽️ Sale refrig.";
+  return "✓ Regresa refrig.";
+}
+
 // ============================================================
 // Sub-componente: FitToBounds (cuando cambian los puestos)
 // ============================================================
@@ -463,7 +470,9 @@ function MarcaPopup({ marca }: { marca: MarcaMapa }) {
         >
           {marca.esFraude ? "Fuera geofence" : "Válida"}
         </span>
-        <span className="text-[10px] uppercase text-gray-500">{marca.tipo}</span>
+        <span className="text-[10px] uppercase text-gray-500">
+          {marcaTipoLabel(marca.tipo)}
+        </span>
       </div>
       {/* Foto thumbnail */}
       {marca.fotoUrl && (

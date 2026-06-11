@@ -5,8 +5,37 @@
  * Mostrará: KPIs + tabla de últimas marcas con polling de 5s.
  */
 
+import Link from "next/link";
+
 import { prisma } from "@/lib/prisma";
+import { estadoDesdeUltimaMarca } from "@/lib/estado-guardia";
 import { formatDistance, formatDateTime } from "@/lib/utils";
+
+// Cuenta cuántos guardias activos están actualmente en refrigerio.
+// Se basa en la última marca del día de cada guardia.
+async function contarEnRefrigerio(): Promise<number> {
+  const inicioHoy = new Date();
+  inicioHoy.setHours(0, 0, 0, 0);
+  const guardias = await prisma.user.findMany({
+    where: { rol: "GUARDIA", activo: true },
+    select: {
+      id: true,
+      marcas: {
+        where: { timestampServidor: { gte: inicioHoy } },
+        orderBy: { timestampServidor: "desc" },
+        take: 1,
+        select: { id: true, tipo: true, timestampServidor: true },
+      },
+    },
+  });
+  let total = 0;
+  for (const g of guardias) {
+    if (estadoDesdeUltimaMarca(g.marcas[0] ?? null) === "EN_REFRIGERIO") {
+      total++;
+    }
+  }
+  return total;
+}
 
 export default async function DashboardPage() {
   const [
@@ -15,6 +44,7 @@ export default async function DashboardPage() {
     totalAlertasPendientes,
     novedadesPendientes,
     novedadesPanico,
+    enRefrigerio,
     marcas,
   ] = await Promise.all([
     prisma.marca.count(),
@@ -22,6 +52,7 @@ export default async function DashboardPage() {
     prisma.alerta.count({ where: { resuelta: false } }),
     prisma.novedad.count({ where: { estado: "PENDIENTE" } }),
     prisma.novedad.count({ where: { estado: "PENDIENTE", tipo: "PANICO" } }),
+    contarEnRefrigerio(),
     prisma.marca.findMany({
       include: { user: true, puesto: true, alerta: true },
       orderBy: { timestampServidor: "desc" },
@@ -39,7 +70,7 @@ export default async function DashboardPage() {
       </header>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="card">
           <p className="text-xs uppercase tracking-wide text-gray-500">Marcas totales</p>
           <p className="mt-2 text-3xl font-bold text-gray-900">{totalMarcas}</p>
@@ -54,6 +85,27 @@ export default async function DashboardPage() {
           <p className="text-xs uppercase tracking-wide text-gray-500">Alertas pendientes</p>
           <p className="mt-2 text-3xl font-bold text-warning-600">{totalAlertasPendientes}</p>
         </div>
+
+        <Link
+          href="/guardias"
+          className={
+            "card transition-colors hover:bg-gray-50 " +
+            (enRefrigerio > 0 ? "bg-accent-50 ring-accent-400/40" : "")
+          }
+          title="Ver guardias y sus reportes"
+        >
+          <p className="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-1">
+            <span aria-hidden>🍽️</span> En refrigerio
+          </p>
+          <p
+            className={
+              "mt-2 text-3xl font-bold tabular-nums " +
+              (enRefrigerio > 0 ? "text-accent-700" : "text-gray-900")
+            }
+          >
+            {enRefrigerio}
+          </p>
+        </Link>
 
         <div
           className={
@@ -98,7 +150,15 @@ export default async function DashboardPage() {
 
       {/* Tabla de últimas marcas */}
       <div className="card overflow-x-auto">
-        <h2 className="mb-4 text-lg font-semibold text-gray-900">Últimas 20 marcas</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Últimas 20 marcas</h2>
+          <Link
+            href="/guardias"
+            className="text-xs font-medium text-primary-700 hover:underline"
+          >
+            Ver todos los guardias →
+          </Link>
+        </div>
 
         {marcas.length === 0 ? (
           <p className="text-sm text-gray-500">No hay marcas todavía.</p>
@@ -112,6 +172,7 @@ export default async function DashboardPage() {
                 <th className="pb-2">Distancia</th>
                 <th className="pb-2">Estado</th>
                 <th className="pb-2">Cuándo</th>
+                <th className="pb-2 text-right">Reporte</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -120,15 +181,7 @@ export default async function DashboardPage() {
                   <td className="py-3 font-medium">{m.user.nombre}</td>
                   <td className="py-3">{m.puesto.nombre}</td>
                   <td className="py-3">
-                    <span
-                      className={
-                        m.tipo === "ENTRADA"
-                          ? "rounded bg-primary-100 px-2 py-0.5 text-xs text-primary-700"
-                          : "rounded bg-gray-200 px-2 py-0.5 text-xs text-gray-700"
-                      }
-                    >
-                      {m.tipo}
-                    </span>
+                    <TipoMarcaBadge tipo={m.tipo} />
                   </td>
                   <td className="py-3 tabular-nums">{formatDistance(m.distanciaPuestoM)}</td>
                   <td className="py-3">
@@ -145,6 +198,14 @@ export default async function DashboardPage() {
                   <td className="py-3 text-xs text-gray-500">
                     {formatDateTime(m.timestampServidor)}
                   </td>
+                  <td className="py-3 text-right">
+                    <Link
+                      href={`/guardias/${m.user.id}/reporte`}
+                      className="text-xs font-medium text-primary-700 hover:underline"
+                    >
+                      Ver →
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -153,5 +214,38 @@ export default async function DashboardPage() {
 
       </div>
     </div>
+  );
+}
+
+function TipoMarcaBadge({
+  tipo,
+}: {
+  tipo: "ENTRADA" | "SALIDA" | "SALIDA_REFRIGERIO" | "ENTRADA_REFRIGERIO";
+}) {
+  if (tipo === "ENTRADA") {
+    return (
+      <span className="rounded bg-primary-100 px-2 py-0.5 text-xs text-primary-700">
+        Entrada
+      </span>
+    );
+  }
+  if (tipo === "SALIDA") {
+    return (
+      <span className="rounded bg-gray-200 px-2 py-0.5 text-xs text-gray-700">
+        Salida
+      </span>
+    );
+  }
+  if (tipo === "SALIDA_REFRIGERIO") {
+    return (
+      <span className="rounded bg-accent-100 px-2 py-0.5 text-xs text-accent-700">
+        🍽️ Sale refrigerio
+      </span>
+    );
+  }
+  return (
+    <span className="rounded bg-accent-50 px-2 py-0.5 text-xs text-accent-700">
+      ✓ Regresa refrigerio
+    </span>
   );
 }

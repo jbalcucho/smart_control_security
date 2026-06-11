@@ -16,7 +16,7 @@ export interface PuestoMapa {
 
 export interface MarcaMapa {
   id: string;
-  tipo: "ENTRADA" | "SALIDA";
+  tipo: "ENTRADA" | "SALIDA" | "SALIDA_REFRIGERIO" | "ENTRADA_REFRIGERIO";
   latitud: number;
   longitud: number;
   precisionM: number;
@@ -24,7 +24,8 @@ export interface MarcaMapa {
   dentroDelGeofence: boolean;
   esFraude: boolean;
   timestampServidor: string;
-  fotoUrl: string;
+  /** null para refrigerios (no llevan selfie). */
+  fotoUrl: string | null;
   user: { id: string; nombre: string };
   puesto: { id: string; nombre: string };
 }

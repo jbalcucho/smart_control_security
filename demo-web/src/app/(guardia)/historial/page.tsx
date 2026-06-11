@@ -32,50 +32,83 @@ export default async function HistorialPage() {
         </section>
       ) : (
         <ul className="space-y-2">
-          {marcas.map((m) => (
-            <li
-              key={m.id}
-              className={
-                "flex items-center gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 " +
-                (m.esFraude ? "ring-danger-200" : "ring-gray-100")
-              }
-            >
-              {/* Thumb */}
-              <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-gray-200">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={m.fotoUrl} alt="" className="h-full w-full object-cover" />
-              </div>
-
-              {/* Info */}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-gray-900">
-                    {m.tipo === "ENTRADA" ? "Entrada" : "Salida"}
-                  </span>
-                  <span className="text-xs text-gray-500">{formatTime(m.timestampServidor)}</span>
+          {marcas.map((m) => {
+            const meta = tipoMeta(m.tipo);
+            return (
+              <li
+                key={m.id}
+                className={
+                  "flex items-center gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 " +
+                  (m.esFraude ? "ring-danger-200" : "ring-gray-100")
+                }
+              >
+                {/* Thumb: foto si existe (turno) o ícono (refrigerio sin selfie) */}
+                <div
+                  className={
+                    "flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg " +
+                    (m.fotoUrl ? "bg-gray-200" : meta.thumbBg)
+                  }
+                >
+                  {m.fotoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.fotoUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-2xl" aria-hidden>
+                      {meta.icon}
+                    </span>
+                  )}
                 </div>
-                <p className="truncate text-xs text-gray-600">{m.puesto.nombre}</p>
-              </div>
 
-              {/* Estado */}
-              <div className="flex-shrink-0">
-                {m.esFraude ? (
-                  <span className="rounded-full bg-danger-100 px-2 py-0.5 text-xs font-medium text-danger-700">
-                    Alerta
-                  </span>
-                ) : (
-                  <span className="rounded-full bg-success-100 px-2 py-0.5 text-xs font-medium text-success-700">
-                    OK
-                  </span>
-                )}
-                <p className="mt-1 text-right text-xs text-gray-500">
-                  {formatRelative(m.timestampServidor)}
-                </p>
-              </div>
-            </li>
-          ))}
+                {/* Info */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-gray-900">
+                      {meta.label}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {formatTime(m.timestampServidor)}
+                    </span>
+                  </div>
+                  <p className="truncate text-xs text-gray-600">{m.puesto.nombre}</p>
+                </div>
+
+                {/* Estado */}
+                <div className="flex-shrink-0">
+                  {m.esFraude ? (
+                    <span className="rounded-full bg-danger-100 px-2 py-0.5 text-xs font-medium text-danger-700">
+                      Alerta
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-success-100 px-2 py-0.5 text-xs font-medium text-success-700">
+                      OK
+                    </span>
+                  )}
+                  <p className="mt-1 text-right text-xs text-gray-500">
+                    {formatRelative(m.timestampServidor)}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
   );
+}
+
+function tipoMeta(tipo: "ENTRADA" | "SALIDA" | "SALIDA_REFRIGERIO" | "ENTRADA_REFRIGERIO") {
+  switch (tipo) {
+    case "ENTRADA":
+      return { label: "Entrada", icon: "▶", thumbBg: "bg-primary-100" };
+    case "SALIDA":
+      return { label: "Salida", icon: "■", thumbBg: "bg-gray-200" };
+    case "SALIDA_REFRIGERIO":
+      return { label: "Sale a refrigerio", icon: "🍽️", thumbBg: "bg-accent-100" };
+    case "ENTRADA_REFRIGERIO":
+      return { label: "Regresa de refrigerio", icon: "✓", thumbBg: "bg-accent-50" };
+  }
 }
