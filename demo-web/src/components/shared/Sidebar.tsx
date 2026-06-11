@@ -14,8 +14,9 @@ import { Logo } from "./Logo";
 const ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/mapa", label: "Mapa" },
-  { href: "/guardias", label: "Guardias" },
   { href: "/alertas", label: "Alertas" },
+  { href: "/guardias", label: "Guardias" },
+  { href: "/puestos", label: "Puestos" },
 ];
 
 interface SidebarProps {

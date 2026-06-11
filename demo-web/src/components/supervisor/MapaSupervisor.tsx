@@ -35,6 +35,11 @@ const MapaLeaflet = dynamic(() => import("./MapaLeaflet").then((m) => m.MapaLeaf
 interface MapaSupervisorProps {
   initial: MapaSnapshot;
   pollMs?: number;
+  /** Query string (sin `?`) que se reenvía al endpoint `/api/mapa-snapshot`
+   *  para preservar el filtro de fecha durante el polling. */
+  apiQueryString?: string;
+  /** Si está en modo "rango", se muestra una pill arriba del mapa. null = live. */
+  rangoLabel?: string | null;
 }
 
 export function MapaSupervisor(props: MapaSupervisorProps) {

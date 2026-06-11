@@ -121,3 +121,129 @@ export const resolverNovedadSchema = z.object({
 });
 
 export type ResolverNovedadInput = z.infer<typeof resolverNovedadSchema>;
+
+// ============================================================
+// Administración de guardias (CRUD desde el panel del supervisor)
+// ============================================================
+
+const HORA_HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const nombreGuardia = z
+  .string()
+  .trim()
+  .min(2, "El nombre debe tener al menos 2 caracteres")
+  .max(120, "El nombre es demasiado largo");
+
+const emailGuardia = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email("Email inválido");
+
+const passwordGuardia = z
+  .string()
+  .min(6, "La contraseña debe tener al menos 6 caracteres")
+  .max(72, "La contraseña es demasiado larga (máx 72)");
+
+/**
+ * Schema para crear un nuevo guardia desde el panel.
+ * `puestoId`, `turnoNombre`, `turnoInicio`, `turnoFin` son opcionales —
+ * un guardia puede crearse sin puesto asignado y se puede asignar luego.
+ */
+export const crearGuardiaSchema = z
+  .object({
+    nombre: nombreGuardia,
+    email: emailGuardia,
+    password: passwordGuardia,
+    rol: z.enum(["GUARDIA", "SUPERVISOR", "ADMIN"]).default("GUARDIA"),
+    puestoId: z.string().min(1).optional().nullable(),
+    turnoNombre: z.string().trim().max(120).optional().nullable(),
+    turnoInicio: z
+      .string()
+      .regex(HORA_HHMM, "Formato esperado HH:MM (24h)")
+      .optional()
+      .nullable(),
+    turnoFin: z
+      .string()
+      .regex(HORA_HHMM, "Formato esperado HH:MM (24h)")
+      .optional()
+      .nullable(),
+    activo: z.boolean().optional().default(true),
+  })
+  .refine(
+    (data) => {
+      const hayInicio = !!data.turnoInicio;
+      const hayFin = !!data.turnoFin;
+      return hayInicio === hayFin;
+    },
+    {
+      message: "Si defines horario de turno debes incluir inicio y fin",
+      path: ["turnoFin"],
+    },
+  );
+
+export type CrearGuardiaInput = z.infer<typeof crearGuardiaSchema>;
+
+/**
+ * Schema para editar un guardia. Todos los campos son opcionales: solo se
+ * actualizan los que vienen.
+ */
+export const editarGuardiaSchema = z
+  .object({
+    nombre: nombreGuardia.optional(),
+    email: emailGuardia.optional(),
+    password: passwordGuardia.optional(),
+    rol: z.enum(["GUARDIA", "SUPERVISOR", "ADMIN"]).optional(),
+    puestoId: z.string().min(1).nullable().optional(),
+    turnoNombre: z.string().trim().max(120).nullable().optional(),
+    turnoInicio: z.string().regex(HORA_HHMM).nullable().optional(),
+    turnoFin: z.string().regex(HORA_HHMM).nullable().optional(),
+    activo: z.boolean().optional(),
+  })
+  .refine(
+    (data) => {
+      // Solo validamos consistencia de horario si alguno viene en el payload.
+      if (data.turnoInicio === undefined && data.turnoFin === undefined) return true;
+      const hayInicio = !!data.turnoInicio;
+      const hayFin = !!data.turnoFin;
+      return hayInicio === hayFin;
+    },
+    {
+      message: "Si defines horario de turno debes incluir inicio y fin",
+      path: ["turnoFin"],
+    },
+  );
+
+export type EditarGuardiaInput = z.infer<typeof editarGuardiaSchema>;
+
+// ============================================================
+// Administración de puestos
+// ============================================================
+
+const baseFieldsPuesto = {
+  nombre: z.string().trim().min(2, "Nombre demasiado corto").max(120),
+  direccion: z.string().trim().min(2, "Dirección demasiado corta").max(255),
+  latitud: z.number().min(-90).max(90),
+  longitud: z.number().min(-180).max(180),
+  radioGeofenceM: z
+    .number()
+    .int("El radio debe ser un número entero")
+    .min(10, "El radio mínimo es 10 m")
+    .max(5000, "El radio máximo es 5 000 m")
+    .default(100),
+  activo: z.boolean().optional().default(true),
+};
+
+export const crearPuestoSchema = z.object(baseFieldsPuesto);
+export type CrearPuestoInput = z.infer<typeof crearPuestoSchema>;
+
+export const editarPuestoSchema = z.object({
+  nombre: baseFieldsPuesto.nombre.optional(),
+  direccion: baseFieldsPuesto.direccion.optional(),
+  latitud: baseFieldsPuesto.latitud.optional(),
+  longitud: baseFieldsPuesto.longitud.optional(),
+  radioGeofenceM: baseFieldsPuesto.radioGeofenceM.optional(),
+  activo: z.boolean().optional(),
+});
+
+export type EditarPuestoInput = z.infer<typeof editarPuestoSchema>;

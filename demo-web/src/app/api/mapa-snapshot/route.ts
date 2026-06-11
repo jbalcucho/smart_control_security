@@ -2,14 +2,13 @@
  * API: /api/mapa-snapshot
  *
  * GET → devuelve en UN solo call todo lo necesario para renderizar el mapa
- *       del supervisor: puestos activos + marcas recientes + novedades activas.
+ *       del supervisor: puestos activos + marcas + novedades.
  *
  *   - Sólo accesible a SUPERVISOR/ADMIN.
- *   - "Marcas recientes" = últimas N (por defecto 50) con coordenadas.
- *   - "Novedades activas" = estado PENDIENTE o EN_ATENCION. Si la novedad
- *     no trajo GPS (caso típico de botón de pánico con countdown corto),
- *     usamos las coords del puesto asignado y dejamos precisionM=null para
- *     que el cliente pueda etiquetarlas como "ubicación aproximada".
+ *   - Si no se envía filtro de fecha: comportamiento anterior — últimas N
+ *     marcas y novedades PENDIENTES/EN_ATENCION.
+ *   - Con filtro (`?desde=&hasta=` o `?fecha=`): marcas y novedades dentro
+ *     del rango (sin restringir el estado de la novedad, para auditoría).
  *
  * Diseñado para ser consumido por polling (cada 10-15s) sin sobrecargar la BD.
  */
@@ -17,9 +16,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { parseRango } from "@/lib/rango-fecha";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 const DEFAULT_MARCAS_LIMIT = 50;
+const RANGE_MARCAS_LIMIT = 500;
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -31,10 +33,34 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const marcasLimit = Math.min(
-    Math.max(Number(searchParams.get("marcasLimit") ?? DEFAULT_MARCAS_LIMIT), 1),
-    200,
+  const rango = parseRango(
+    {
+      fecha: searchParams.get("fecha") ?? undefined,
+      desde: searchParams.get("desde") ?? undefined,
+      hasta: searchParams.get("hasta") ?? undefined,
+    },
+    { defaultMode: "todas" },
   );
+
+  const tieneRango = rango.desde != null && rango.hasta != null;
+
+  const marcasLimit = tieneRango
+    ? RANGE_MARCAS_LIMIT
+    : Math.min(
+        Math.max(Number(searchParams.get("marcasLimit") ?? DEFAULT_MARCAS_LIMIT), 1),
+        200,
+      );
+
+  const whereMarca: Prisma.MarcaWhereInput = tieneRango
+    ? { timestampServidor: { gte: rango.desde!, lte: rango.hasta! } }
+    : {};
+
+  // En modo rango mostramos TODAS las novedades del periodo (independiente
+  // del estado) para que el supervisor pueda auditar histórico. Sin rango,
+  // solo activas (PENDIENTE / EN_ATENCION).
+  const whereNovedad: Prisma.NovedadWhereInput = tieneRango
+    ? { timestampServidor: { gte: rango.desde!, lte: rango.hasta! } }
+    : { estado: { in: ["PENDIENTE", "EN_ATENCION"] } };
 
   const [puestos, marcas, novedades] = await Promise.all([
     prisma.puesto.findMany({
@@ -50,6 +76,7 @@ export async function GET(request: NextRequest) {
       orderBy: { nombre: "asc" },
     }),
     prisma.marca.findMany({
+      where: whereMarca,
       orderBy: { timestampServidor: "desc" },
       take: marcasLimit,
       select: {
@@ -68,9 +95,7 @@ export async function GET(request: NextRequest) {
       },
     }),
     prisma.novedad.findMany({
-      where: {
-        estado: { in: ["PENDIENTE", "EN_ATENCION"] },
-      },
+      where: whereNovedad,
       orderBy: { timestampServidor: "desc" },
       take: 100,
       select: {
@@ -122,6 +147,12 @@ export async function GET(request: NextRequest) {
     puestos,
     marcas,
     novedades: novedadesMapa,
+    rango: {
+      modo: rango.modo,
+      label: rango.label,
+      desde: rango.desdeIso,
+      hasta: rango.hastaIso,
+    },
     generatedAt: new Date().toISOString(),
   });
 }

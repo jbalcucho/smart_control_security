@@ -133,6 +133,11 @@ function FitBounds({ puestos }: { puestos: PuestoMapa[] }) {
 interface MapaLeafletProps {
   initial: MapaSnapshot;
   pollMs?: number;
+  /** Query string (sin `?`) reenviado al endpoint para mantener el filtro
+   *  de fecha durante el polling. Vacío = vista live. */
+  apiQueryString?: string;
+  /** Si está presente, el header muestra la pill con la etiqueta del rango. */
+  rangoLabel?: string | null;
 }
 
 interface LayerToggles {
@@ -155,7 +160,12 @@ const DEFAULT_LAYERS: LayerToggles = {
 const FALLBACK_CENTER: [number, number] = [4.711, -74.0721];
 const FALLBACK_ZOOM = 12;
 
-export function MapaLeaflet({ initial, pollMs = 10_000 }: MapaLeafletProps) {
+export function MapaLeaflet({
+  initial,
+  pollMs = 10_000,
+  apiQueryString = "",
+  rangoLabel = null,
+}: MapaLeafletProps) {
   const [data, setData] = useState<MapaSnapshot>(initial);
   const [layers, setLayers] = useState<LayerToggles>(DEFAULT_LAYERS);
   const [fetching, setFetching] = useState(false);
@@ -165,13 +175,23 @@ export function MapaLeaflet({ initial, pollMs = 10_000 }: MapaLeafletProps) {
   );
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
 
+  // Cuando cambia el filtro server-side (initial cambia), reseteamos el state
+  // para que el mapa muestre el nuevo conjunto sin esperar al próximo tick.
+  useEffect(() => {
+    setData(initial);
+    knownNovedadIdsRef.current = new Set(initial.novedades.map((n) => n.id));
+    setHighlightIds(new Set());
+    setLastFetch(new Date(initial.generatedAt));
+  }, [initial]);
+
   // ----------------------------------------------------------
   // Polling
   // ----------------------------------------------------------
   const fetchSnapshot = useCallback(async () => {
     setFetching(true);
     try {
-      const res = await fetch("/api/mapa-snapshot", { cache: "no-store" });
+      const qs = apiQueryString ? `?${apiQueryString}` : "";
+      const res = await fetch(`/api/mapa-snapshot${qs}`, { cache: "no-store" });
       if (!res.ok) return;
       const snapshot = (await res.json()) as MapaSnapshot;
 
@@ -199,7 +219,7 @@ export function MapaLeaflet({ initial, pollMs = 10_000 }: MapaLeafletProps) {
     } finally {
       setFetching(false);
     }
-  }, []);
+  }, [apiQueryString]);
 
   useEffect(() => {
     const id = setInterval(fetchSnapshot, pollMs);
@@ -270,6 +290,16 @@ export function MapaLeaflet({ initial, pollMs = 10_000 }: MapaLeafletProps) {
       {/* Barra superior: KPIs + estado del polling */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          {rangoLabel ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2.5 py-1 text-xs font-semibold text-primary-800 ring-1 ring-primary-200">
+              📅 {rangoLabel}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-success-100 px-2.5 py-1 text-xs font-semibold text-success-800 ring-1 ring-success-200">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success-600" />
+              En vivo
+            </span>
+          )}
           <KpiPill label="Puestos" value={data.puestos.length} color="primary" />
           <KpiPill label="Marcas ✓" value={counts.marcasValidas} color="success" />
           <KpiPill label="Marcas ✗" value={counts.marcasFraude} color="danger" />
