@@ -8,14 +8,18 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Smart Control Security — Demo",
+  title: "Scorpions D.L. — Private Security",
   description:
-    "Demo del sistema de control de asistencia para guardias de seguridad. Mobile-first.",
-  applicationName: "SCS Demo",
+    "Sistema de control de asistencia y reporte de novedades para guardias de Scorpions D.L. Private Security.",
+  applicationName: "Scorpions D.L.",
   appleWebApp: {
     capable: true,
-    title: "SCS",
+    title: "Scorpions D.L.",
     statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: "/logo.jpeg",
+    apple: "/logo.jpeg",
   },
 };
 
@@ -24,7 +28,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#2563eb",
+  themeColor: "#0a0a0a",
 };
 
 export default function RootLayout({

@@ -9,6 +9,7 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 
 import { cn, getInitials } from "@/lib/utils";
+import { Logo } from "./Logo";
 
 const ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
@@ -25,24 +26,20 @@ export function Sidebar({ userName, role }: SidebarProps) {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden w-64 flex-shrink-0 border-r border-gray-200 bg-white p-4 lg:flex lg:flex-col">
-      {/* Brand */}
-      <div className="mb-8 flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-600 text-white">
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-            />
-          </svg>
-        </div>
-        <div>
-          <p className="text-sm font-bold text-gray-900">SCS</p>
-          <p className="text-xs text-gray-500">Smart Control</p>
+    <aside className="hidden w-64 flex-shrink-0 border-r border-gray-200 bg-white lg:flex lg:flex-col">
+      {/* Brand header (fondo oscuro tipo placa de seguridad) */}
+      <div className="flex items-center gap-3 border-b border-brand-dark-800 bg-brand-dark-950 px-4 py-3">
+        <Logo size="md" priority />
+        <div className="leading-tight">
+          <p className="text-sm font-bold text-white">Scorpions D.L.</p>
+          <p className="text-[10px] uppercase tracking-wider text-accent-400">
+            Private Security
+          </p>
         </div>
       </div>
+
+      {/* Cuerpo con padding interno */}
+      <div className="flex flex-1 flex-col p-4">
 
       {/* Nav */}
       <nav className="flex-1 space-y-1">
@@ -83,6 +80,7 @@ export function Sidebar({ userName, role }: SidebarProps) {
         >
           Cerrar sesión
         </button>
+      </div>
       </div>
     </aside>
   );

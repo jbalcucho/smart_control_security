@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 
 import { cn } from "@/lib/utils";
+import { Logo } from "@/components/shared/Logo";
 
 const DEMO_USERS = [
   { email: "guardia1@demo.com", label: "Guardia 1 (Sede Norte)" },
@@ -64,27 +65,31 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-primary-50 to-primary-100 p-4">
-      <div className="w-full max-w-md">
+    <main className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-dark-950 via-brand-dark-900 to-brand-dark-800 p-4">
+      {/* Patrón sutil en el fondo */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.04]"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 1px 1px, #facc15 1px, transparent 0)",
+          backgroundSize: "32px 32px",
+        }}
+        aria-hidden
+      />
+
+      <div className="relative w-full max-w-md">
         {/* Logo / Brand */}
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-600 text-white shadow-lg">
-            <svg
-              className="h-8 w-8"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-              />
-            </svg>
+          <div className="mx-auto mb-4 inline-flex">
+            <Logo size="xl" priority />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Smart Control Security</h1>
-          <p className="mt-1 text-sm text-gray-600">Control de asistencia para guardias</p>
+          <h1 className="text-2xl font-bold text-white">Scorpions D.L.</h1>
+          <p className="mt-0.5 text-sm font-semibold uppercase tracking-[0.3em] text-accent-400">
+            Private Security
+          </p>
+          <p className="mt-3 text-sm text-gray-300">
+            Sistema de control de asistencia
+          </p>
         </div>
 
         {/* Formulario */}
@@ -148,8 +153,8 @@ export default function LoginPage() {
         </form>
 
         {/* Quick-fill para el demo */}
-        <div className="mt-6 rounded-2xl bg-white/60 p-4 ring-1 ring-gray-200 backdrop-blur">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="mt-6 rounded-2xl bg-white/10 p-4 ring-1 ring-white/15 backdrop-blur">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-accent-400">
             Demo · Usuarios de prueba
           </p>
           <div className="space-y-1">
@@ -158,15 +163,18 @@ export default function LoginPage() {
                 key={u.email}
                 type="button"
                 onClick={() => quickFill(u.email)}
-                className="block w-full rounded px-2 py-1.5 text-left text-sm text-gray-700 transition-colors hover:bg-primary-50 hover:text-primary-700"
+                className="block w-full rounded px-2 py-1.5 text-left text-sm text-gray-200 transition-colors hover:bg-white/10 hover:text-white"
               >
                 <span className="font-medium">{u.label}</span>
-                <span className="ml-2 text-xs text-gray-500">{u.email}</span>
+                <span className="ml-2 text-xs text-gray-400">{u.email}</span>
               </button>
             ))}
           </div>
-          <p className="mt-2 text-xs text-gray-500">
-            Contraseña para todos: <code className="rounded bg-gray-200 px-1">demo1234</code>
+          <p className="mt-2 text-xs text-gray-400">
+            Contraseña para todos:{" "}
+            <code className="rounded bg-white/15 px-1.5 py-0.5 text-accent-400">
+              demo1234
+            </code>
           </p>
         </div>
       </div>
