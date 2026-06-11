@@ -1,23 +1,38 @@
 /**
- * Mapa del Supervisor.
+ * API: /api/mapa-snapshot
  *
- * Server Component que precarga puestos + marcas + novedades activas y
- * delega el render a <MapaSupervisor /> (que internamente carga Leaflet
- * con dynamic import porque usa `window`).
+ * GET → devuelve en UN solo call todo lo necesario para renderizar el mapa
+ *       del supervisor: puestos activos + marcas recientes + novedades activas.
+ *
+ *   - Sólo accesible a SUPERVISOR/ADMIN.
+ *   - "Marcas recientes" = últimas N (por defecto 50) con coordenadas.
+ *   - "Novedades activas" = estado PENDIENTE o EN_ATENCION y que tengan GPS.
+ *
+ * Diseñado para ser consumido por polling (cada 10-15s) sin sobrecargar la BD.
  */
 
+import { NextResponse, type NextRequest } from "next/server";
+
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { MapaSupervisor } from "@/components/supervisor/MapaSupervisor";
-import type {
-  MapaSnapshot,
-  MarcaMapa,
-  NovedadMapa,
-  PuestoMapa,
-} from "@/components/supervisor/mapa-types";
 
-const POLL_MS = Number(process.env.NEXT_PUBLIC_DASHBOARD_POLL_MS ?? 10_000);
+const DEFAULT_MARCAS_LIMIT = 50;
 
-export default async function MapaPage() {
+export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+  if (session.user.rol === "GUARDIA") {
+    return NextResponse.json({ error: "Acceso denegado" }, { status: 403 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const marcasLimit = Math.min(
+    Math.max(Number(searchParams.get("marcasLimit") ?? DEFAULT_MARCAS_LIMIT), 1),
+    200,
+  );
+
   const [puestos, marcas, novedades] = await Promise.all([
     prisma.puesto.findMany({
       where: { activo: true },
@@ -33,7 +48,7 @@ export default async function MapaPage() {
     }),
     prisma.marca.findMany({
       orderBy: { timestampServidor: "desc" },
-      take: 50,
+      take: marcasLimit,
       select: {
         id: true,
         tipo: true,
@@ -74,34 +89,10 @@ export default async function MapaPage() {
     }),
   ]);
 
-  // Adaptamos a la forma serializada (fechas como ISO string).
-  const initial: MapaSnapshot = {
-    puestos: puestos as PuestoMapa[],
-    marcas: marcas.map((m) => ({
-      ...m,
-      timestampServidor: m.timestampServidor.toISOString(),
-    })) as MarcaMapa[],
-    novedades: novedades
-      .filter((n) => n.latitud != null && n.longitud != null)
-      .map((n) => ({
-        ...n,
-        latitud: n.latitud as number,
-        longitud: n.longitud as number,
-        timestampServidor: n.timestampServidor.toISOString(),
-      })) as NovedadMapa[],
+  return NextResponse.json({
+    puestos,
+    marcas,
+    novedades,
     generatedAt: new Date().toISOString(),
-  };
-
-  return (
-    <div className="space-y-4 animate-fade-in">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-900">Mapa</h1>
-        <p className="mt-1 text-sm text-gray-600">
-          Puestos, marcas recientes y novedades activas en tiempo real
-        </p>
-      </header>
-
-      <MapaSupervisor initial={initial} pollMs={POLL_MS} />
-    </div>
-  );
+  });
 }
