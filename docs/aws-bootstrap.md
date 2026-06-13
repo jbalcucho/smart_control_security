@@ -23,10 +23,11 @@
 10. [Paso 8 — Crear Budget Alert de seguridad](#paso-8--crear-budget-alert-de-seguridad)
 11. [Paso 9 — Crear grupo IAM y asignar permisos](#paso-9--crear-grupo-iam-y-asignar-permisos)
 12. [Paso 10 — Configurar los MCPs de AWS en Cursor](#paso-10--configurar-los-mcps-de-aws-en-cursor)
-13. [Verificación final](#13-verificación-final)
-14. [Operación recurrente](#14-operación-recurrente)
-15. [Troubleshooting](#15-troubleshooting)
-16. [Apéndice — Comandos útiles](#16-apéndice--comandos-útiles)
+13. [Paso 11 — Crear primeros recursos Fase 1](#paso-11--crear-primeros-recursos-fase-1)
+14. [Verificación final](#14-verificación-final)
+15. [Operación recurrente](#15-operación-recurrente)
+16. [Troubleshooting](#16-troubleshooting)
+17. [Apéndice — Comandos útiles](#17-apéndice--comandos-útiles)
 
 ---
 
@@ -43,6 +44,8 @@ Al terminar este playbook tenés:
 | Budget Alert de **10 USD/mes** con 4 niveles (50%, 80%, 100% real, 100% pronosticado) | ✅ |
 | 9 MCPs AWS configurados en `.cursor/mcp.json` | ✅ |
 | `.gitignore` blindado contra archivos de credenciales | ✅ |
+| Bucket S3 `smart-control-dev` con cifrado, versioning, lifecycle y CORS | ✅ |
+| IAM Role `smart-control-app-role` con política least-privilege para la app | ✅ |
 
 **Principio rector:** least privilege, MFA en todo lo que mira a internet, budget alert como red de seguridad económica.
 
@@ -207,7 +210,7 @@ aws-credentials*
 .aws/
 ```
 
-> 🔐 **Si por error ya commiteaste el CSV:** rotá las keys **inmediatamente** (Paso 14.1) y eliminá del histórico con `git filter-repo` o BFG. **No basta con `git rm`** — quedan en el histórico para siempre.
+> 🔐 **Si por error ya commiteaste el CSV:** rotá las keys **inmediatamente** (sección 15.1) y eliminá del histórico con `git filter-repo` o BFG. **No basta con `git rm`** — quedan en el histórico para siempre.
 
 ---
 
@@ -375,7 +378,7 @@ Todos deben decir `allowed`.
 **Trade-off aceptado:** el usuario podría crear otros usuarios IAM. **Mitigaciones activas:**
 - Budget Alert de $10 limita el daño económico.
 - `.gitignore` previene leak de keys.
-- Las keys deberían rotarse cada 90 días (ver Paso 14.1).
+- Las keys deberían rotarse cada 90 días (ver sección 15.1).
 
 **Cuándo migrar a estricto-mínimo:** cuando entre un segundo dev al equipo, o cuando se cree el ambiente de **staging/prod**. En ese punto vale la pena armar políticas custom por servicio (ver Apéndice A).
 
@@ -496,7 +499,323 @@ Archivo: `.cursor/mcp.json`
 
 ---
 
-## 13. Verificación final
+## Paso 11 — Crear primeros recursos Fase 1
+
+Una vez la cuenta está bootstrapeada (Pasos 1–10), arrancamos a crear los recursos reales de la app. **Orden recomendado** (de menos a más caro/riesgoso):
+
+| # | Recurso | Costo/mes esperado | Estado |
+|---|---|---|---|
+| 1 | Bucket S3 `smart-control-dev` para fotos | $0 (Free Tier 12 meses) | ✅ Creado |
+| 2 | IAM Role `smart-control-app-role` + policy | $0 (IAM siempre gratis) | ✅ Creado |
+| 3 | Secrets Manager (DB password placeholder) | ~$0.40/secret | ⏳ Pendiente |
+| 4 | RDS Aurora Serverless v2 PostgreSQL | ~$45 (0.5 ACU mínimo) | ⏳ Pendiente |
+| 5 | SES (sandbox al inicio) | $0 hasta 62k emails | ⏳ Pendiente |
+| 6 | Rekognition (sin recurso, on-demand) | ~$1/1000 face-compare | ⏳ Pendiente |
+| 7 | CloudWatch Log Group `/smart-control/api` | ~$0.50/GB | ⏳ Pendiente |
+| 8 | Amplify Hosting | Variable | ⏳ Pendiente |
+
+### 11.1 — Bucket S3 `smart-control-dev`
+
+**Decisión de naming:** un solo bucket por ambiente con **prefijos internos** (`fotos/marcas/`, `fotos/incidentes/`, `reportes/`, `backups/`). Más simple que mantener N buckets con IAM/CORS por separado. Si más adelante un prefijo necesita lifecycle propio se mueve a su bucket.
+
+**Configuración de seguridad aplicada:**
+
+| Setting | Valor |
+|---|---|
+| Block Public Access | 4/4 capas activas |
+| Default encryption | AES256 (SSE-S3, gratis) |
+| Versioning | Enabled (recupera de delete/overwrite por error) |
+| Lifecycle (versiones viejas) | IA tras 30 días → Glacier tras 90 → Delete tras 365 |
+| CORS | `localhost:3000`, `localhost:3001`, `*.amplifyapp.com` |
+| Tags | Project, Environment, Phase, Owner, CostCenter, ManagedBy |
+
+**Comandos** (idempotentes en su mayoría, salvo `create-bucket`):
+
+```bash
+BUCKET=smart-control-dev
+REGION=us-east-2
+PROFILE=smart-control
+
+# 1. Crear el bucket
+aws s3api create-bucket \
+  --bucket "$BUCKET" \
+  --region "$REGION" \
+  --create-bucket-configuration LocationConstraint="$REGION" \
+  --profile "$PROFILE"
+
+# 2. Block ALL public access (4 capas)
+aws s3api put-public-access-block \
+  --bucket "$BUCKET" \
+  --public-access-block-configuration \
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
+  --profile "$PROFILE"
+
+# 3. Default encryption AES256
+aws s3api put-bucket-encryption \
+  --bucket "$BUCKET" \
+  --server-side-encryption-configuration '{
+    "Rules": [{
+      "ApplyServerSideEncryptionByDefault": { "SSEAlgorithm": "AES256" },
+      "BucketKeyEnabled": true
+    }]
+  }' \
+  --profile "$PROFILE"
+
+# 4. Versioning
+aws s3api put-bucket-versioning \
+  --bucket "$BUCKET" \
+  --versioning-configuration Status=Enabled \
+  --profile "$PROFILE"
+
+# 5. Lifecycle
+cat > /tmp/lifecycle.json <<'EOF'
+{
+  "Rules": [
+    {
+      "ID": "transition-noncurrent-versions",
+      "Status": "Enabled",
+      "Filter": {},
+      "NoncurrentVersionTransitions": [
+        { "NoncurrentDays": 30, "StorageClass": "STANDARD_IA" },
+        { "NoncurrentDays": 90, "StorageClass": "GLACIER" }
+      ],
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 365 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    }
+  ]
+}
+EOF
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket "$BUCKET" \
+  --lifecycle-configuration file:///tmp/lifecycle.json \
+  --profile "$PROFILE"
+
+# 6. CORS para uploads directos desde browser
+cat > /tmp/cors.json <<'EOF'
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://*.amplifyapp.com"
+      ],
+      "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag", "x-amz-version-id"],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+}
+EOF
+aws s3api put-bucket-cors \
+  --bucket "$BUCKET" \
+  --cors-configuration file:///tmp/cors.json \
+  --profile "$PROFILE"
+
+# 7. Tags
+aws s3api put-bucket-tagging \
+  --bucket "$BUCKET" \
+  --tagging 'TagSet=[
+    {Key=Project,Value=smart-control-security},
+    {Key=Environment,Value=dev},
+    {Key=Phase,Value=fase-1},
+    {Key=Owner,Value=wallyribal@gmail.com},
+    {Key=CostCenter,Value=smart-control},
+    {Key=ManagedBy,Value=manual}
+  ]' \
+  --profile "$PROFILE"
+
+# 8. Estructura interna con markers .keep (para que se vean en Console)
+for prefix in "fotos/marcas/" "fotos/incidentes/" "reportes/" "backups/"; do
+  echo "" | aws s3api put-object \
+    --bucket "$BUCKET" \
+    --key "${prefix}.keep" \
+    --profile "$PROFILE" > /dev/null
+done
+
+rm /tmp/lifecycle.json /tmp/cors.json
+```
+
+**Verificación:**
+
+```bash
+# Resumen de configs
+aws s3api get-public-access-block --bucket smart-control-dev --profile smart-control
+aws s3api get-bucket-encryption    --bucket smart-control-dev --profile smart-control
+aws s3api get-bucket-versioning    --bucket smart-control-dev --profile smart-control
+aws s3api get-bucket-tagging       --bucket smart-control-dev --profile smart-control
+aws s3 ls s3://smart-control-dev/ --recursive --profile smart-control
+```
+
+### 11.2 — IAM Role `smart-control-app-role` + policy
+
+Este es el role que **Lambda / Amplify Hosting** asumen en runtime para acceder a AWS desde la app. **Nunca** se le entregan access keys del usuario IAM a la app desplegada — siempre via role + temporary credentials.
+
+**Diseño:**
+
+| Aspecto | Decisión |
+|---|---|
+| Trust principals | `lambda.amazonaws.com` + `amplify.amazonaws.com` |
+| Policy type | Customer-managed (`smart-control-app-policy`) — reutilizable, visible, versionable |
+| Scope S3 | Solo el bucket `smart-control-dev` y sus objetos |
+| Scope Secrets Manager | Solo bajo prefijo `smart-control/*` (no otros secrets de la cuenta) |
+| Scope CloudWatch Logs | Solo bajo `/smart-control/*` log groups |
+| Scope Rekognition | Acciones específicas de face liveness + compare (no Collections, no índices) |
+| NO incluye | RDS, SES, IAM, EC2, otras cuentas/regiones (se agregan cuando se necesitan) |
+
+**Trust policy** (`/tmp/trust-policy.json`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "AllowLambdaAndAmplifyToAssume",
+    "Effect": "Allow",
+    "Principal": {
+      "Service": ["lambda.amazonaws.com", "amplify.amazonaws.com"]
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+**Permissions policy** (`/tmp/app-policy.json`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3ObjectsReadWriteDelete",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
+        "s3:GetObjectVersion", "s3:DeleteObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::smart-control-dev/*"
+    },
+    {
+      "Sid": "S3BucketList",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": "arn:aws:s3:::smart-control-dev"
+    },
+    {
+      "Sid": "RekognitionFaceLivenessAndCompare",
+      "Effect": "Allow",
+      "Action": [
+        "rekognition:DetectFaces",
+        "rekognition:CompareFaces",
+        "rekognition:StartFaceLivenessSession",
+        "rekognition:CreateFaceLivenessSession",
+        "rekognition:GetFaceLivenessSessionResults"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SecretsManagerReadAppSecrets",
+      "Effect": "Allow",
+      "Action": ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+      "Resource": "arn:aws:secretsmanager:us-east-2:052251888904:secret:smart-control/*"
+    },
+    {
+      "Sid": "CloudWatchLogsWriteOwnNamespace",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup", "logs:CreateLogStream",
+        "logs:PutLogEvents", "logs:DescribeLogStreams"
+      ],
+      "Resource": "arn:aws:logs:us-east-2:052251888904:log-group:/smart-control/*"
+    }
+  ]
+}
+```
+
+**Comandos de creación:**
+
+```bash
+PROFILE=smart-control
+ACCOUNT_ID=052251888904
+REGION=us-east-2
+ROLE_NAME=smart-control-app-role
+POLICY_NAME=smart-control-app-policy
+
+# 1. Crear la política
+POLICY_ARN=$(aws iam create-policy \
+  --policy-name "$POLICY_NAME" \
+  --description "Least-privilege para la app Smart Control Fase 1: S3, Rekognition, Secrets Manager, CloudWatch Logs" \
+  --policy-document file:///tmp/app-policy.json \
+  --tags Key=Project,Value=smart-control-security Key=Environment,Value=dev Key=Phase,Value=fase-1 Key=ManagedBy,Value=manual \
+  --profile "$PROFILE" \
+  --query 'Policy.Arn' --output text)
+
+# 2. Crear el role con trust policy
+aws iam create-role \
+  --role-name "$ROLE_NAME" \
+  --description "Role asumido por Lambda/Amplify para la app Smart Control Fase 1" \
+  --assume-role-policy-document file:///tmp/trust-policy.json \
+  --tags Key=Project,Value=smart-control-security Key=Environment,Value=dev Key=Phase,Value=fase-1 Key=Owner,Value=wallyribal@gmail.com Key=CostCenter,Value=smart-control Key=ManagedBy,Value=manual \
+  --profile "$PROFILE"
+
+# 3. Adjuntar política al role
+aws iam attach-role-policy \
+  --role-name "$ROLE_NAME" \
+  --policy-arn "$POLICY_ARN" \
+  --profile "$PROFILE"
+```
+
+**Verificación** (acción ↔ recurso, debe simular `allowed` o `implicitDeny` según la regla):
+
+```bash
+ROLE_ARN=arn:aws:iam::052251888904:role/smart-control-app-role
+
+# Test individual: cada par action|resource
+for test in \
+  "s3:PutObject|arn:aws:s3:::smart-control-dev/fotos/marcas/test.jpg" \
+  "s3:DeleteBucket|arn:aws:s3:::smart-control-dev" \
+  "secretsmanager:GetSecretValue|arn:aws:secretsmanager:us-east-2:052251888904:secret:smart-control/db-AbCdEf" \
+  "secretsmanager:GetSecretValue|arn:aws:secretsmanager:us-east-2:052251888904:secret:otro-prefijo/xyz" \
+  "rekognition:CompareFaces|*" \
+  "iam:CreateUser|*"
+do
+  ACTION="${test%|*}"; RESOURCE="${test#*|}"
+  RESULT=$(aws iam simulate-principal-policy \
+    --policy-source-arn "$ROLE_ARN" \
+    --action-names "$ACTION" \
+    --resource-arns "$RESOURCE" \
+    --profile smart-control \
+    --query 'EvaluationResults[0].EvalDecision' --output text)
+  printf "  %-50s %s\n" "$ACTION" "$RESULT"
+done
+```
+
+**Resultado esperado:**
+
+```
+s3:PutObject                                       allowed
+s3:DeleteBucket                                    implicitDeny
+secretsmanager:GetSecretValue (smart-control/*)    allowed
+secretsmanager:GetSecretValue (otro-prefijo)       implicitDeny
+rekognition:CompareFaces                           allowed
+iam:CreateUser                                     implicitDeny
+```
+
+### 11.3 — Próximos recursos (a documentar cuando se creen)
+
+A medida que se crean, agregar subsecciones aquí:
+
+- 11.4 — Secrets Manager `smart-control/db-password` (pendiente)
+- 11.5 — RDS Aurora Serverless v2 PostgreSQL (pendiente)
+- 11.6 — SES + dominios verificados (pendiente)
+- 11.7 — CloudWatch Log Group `/smart-control/api` (pendiente)
+- 11.8 — Amplify Hosting (pendiente)
+
+> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la política actual NO incluye RDS, SES, ni nada más allá de lo listado en 11.2.
+
+---
+
+## 14. Verificación final
 
 Después de los 10 pasos, esto debe funcionar:
 
@@ -534,9 +853,9 @@ git check-ignore -v test-accessKeys.csv
 
 ---
 
-## 14. Operación recurrente
+## 15. Operación recurrente
 
-### 14.1 — Rotar access keys (cada 90 días)
+### 15.1 — Rotar access keys (cada 90 días)
 
 ```bash
 # Desde la CLI local con las keys actuales
@@ -564,7 +883,7 @@ aws iam delete-access-key --user-name "$USER" \
   --access-key-id "AKIA_VIEJA" --profile smart-control
 ```
 
-### 14.2 — Aumentar el budget cuando empieces a desplegar prod
+### 15.2 — Aumentar el budget cuando empieces a desplegar prod
 
 ```bash
 cat > /tmp/budget-update.json <<'EOF'
@@ -586,7 +905,7 @@ rm /tmp/budget-update.json
 
 > 💡 **Recomendación:** Renombrá el budget a `smart-control-monthly-200usd` (o creá uno nuevo) para que el nombre refleje el límite vigente.
 
-### 14.3 — Agregar un nuevo dev al equipo
+### 15.3 — Agregar un nuevo dev al equipo
 
 Si entra otro dev:
 
@@ -599,7 +918,7 @@ No es necesario re-asignar políticas — las hereda del grupo.
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### `An error occurred (AccessDenied) when calling X`
 
@@ -646,7 +965,7 @@ Reemplazá `"command": "uvx"` por `"command": "/usr/local/bin/uvx"` (o la ruta q
 ### El CSV se commiteó por accidente
 
 ```bash
-# 1. ROTAR LAS KEYS INMEDIATAMENTE (ver 14.1)
+# 1. ROTAR LAS KEYS INMEDIATAMENTE (ver 15.1)
 # 2. Eliminar del histórico
 git filter-repo --path smart-control-dev_accessKeys.csv --invert-paths
 # 3. Force-push (coordinar con equipo)
@@ -655,7 +974,7 @@ git push --force-with-lease
 
 ---
 
-## 16. Apéndice — Comandos útiles
+## 17. Apéndice — Comandos útiles
 
 ### A. Política IAM custom estricto-mínimo (para Fase 2 / staging / prod)
 
