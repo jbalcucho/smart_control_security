@@ -47,6 +47,7 @@ Al terminar este playbook tenés:
 | Bucket S3 `smart-control-dev` con cifrado, versioning, lifecycle y CORS | ✅ |
 | IAM Role `smart-control-app-role` con política least-privilege para la app | ✅ |
 | CloudWatch Log Group `/smart-control/api` con retention 30 días | ✅ |
+| SSM Parameter Store `/smart-control/db-password` (SecureString, $0/mes) | ✅ |
 
 **Principio rector:** least privilege, MFA en todo lo que mira a internet, budget alert como red de seguridad económica.
 
@@ -509,7 +510,7 @@ Una vez la cuenta está bootstrapeada (Pasos 1–10), arrancamos a crear los rec
 | 1 | Bucket S3 `smart-control-dev` para fotos | $0 (Free Tier 12 meses) | ✅ Creado |
 | 2 | IAM Role `smart-control-app-role` + policy | $0 (IAM siempre gratis) | ✅ Creado |
 | 3 | CloudWatch Log Group `/smart-control/api` | $0 (Free Tier 5GB ingest + 5GB storage) | ✅ Creado |
-| 4 | Secrets Manager (DB password placeholder) | ~$0.40/secret | ⏳ Pendiente |
+| 4 | SSM Parameter Store `/smart-control/db-password` | $0 (Standard tier, Free forever) | ✅ Creado |
 | 5 | RDS Aurora Serverless v2 PostgreSQL | ~$45 (0.5 ACU mínimo) | ⏳ Pendiente |
 | 6 | SES (sandbox al inicio) | $0 hasta 62k emails | ⏳ Pendiente |
 | 7 | Rekognition (sin recurso, on-demand) | ~$1/1000 face-compare | ⏳ Pendiente |
@@ -958,16 +959,220 @@ aws logs put-retention-policy \
 | Insights queries | ~100 MB scanned/mes | Free (Tier cubre 5 GB scanned) |
 | **Total** | | **$0/mes durante 12 meses, ~$1-2/mes después** |
 
-### 11.4 — Próximos recursos (a documentar cuando se creen)
+### 11.4 — SSM Parameter Store `/smart-control/db-password`
+
+**Decisión: Parameter Store en lugar de Secrets Manager.** Comparación que motivó la elección:
+
+| Aspecto | AWS Secrets Manager | AWS SSM Parameter Store (SecureString) |
+|---|---|---|
+| Free Tier | Solo **30 días de prueba** por secret | **Free forever** (Standard tier, hasta 10k params) |
+| Costo después | $0.40/secret/mes + $0.05/10k API calls | $0 |
+| Cifrado en reposo | KMS gestionado | KMS gestionado (alias `aws/ssm` o custom) |
+| Tamaño máximo | 64 KB | 4 KB (Standard) / 8 KB (Advanced, paga) |
+| Rotación automática de RDS password | ✅ Built-in | ❌ Manual |
+| Versioning | ✅ | ✅ (Standard limitado) |
+| Replicación multi-región | ✅ | ❌ (Standard) |
+
+**Para Fase 1 dev** (un único entorno, budget $10/mes, sin necesidad de rotación automática) Parameter Store gana en todo lo que importa. Cuando llegue Fase 2/prod y querramos rotación automática de la password de RDS, se migra ese secret específico a Secrets Manager (los otros pueden quedarse en Parameter Store).
+
+#### 11.4.1 — Actualizar la policy `smart-control-app-policy` (v1 → v2)
+
+Antes de crear el parámetro hay que agregarle permisos de SSM + KMS al role. Hacemos `CreatePolicyVersion` (IAM permite hasta 5 versiones por policy y conserva las viejas por si hay que rollback).
+
+**Statements nuevos a agregar:**
+
+```json
+{
+  "Sid": "SSMParameterStoreReadAppParams",
+  "Effect": "Allow",
+  "Action": [
+    "ssm:GetParameter",
+    "ssm:GetParameters",
+    "ssm:GetParametersByPath"
+  ],
+  "Resource": "arn:aws:ssm:us-east-2:052251888904:parameter/smart-control/*"
+},
+{
+  "Sid": "KMSDecryptForSecureStrings",
+  "Effect": "Allow",
+  "Action": ["kms:Decrypt"],
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": {
+      "kms:ViaService": "ssm.us-east-2.amazonaws.com"
+    }
+  }
+}
+```
+
+> 🔒 **Por qué `kms:Decrypt` con condition:** Si pusiéramos `Resource: "*"` sin condition, el role podría descifrar **cualquier KMS key** de la cuenta. La condición `kms:ViaService` limita el descifrado a llamadas que vienen específicamente desde SSM en us-east-2. Es el patrón recomendado por AWS para SecureString.
+
+**Comandos:**
+
+```bash
+PROFILE=smart-control
+POLICY_ARN="arn:aws:iam::052251888904:policy/smart-control-app-policy"
+
+# 1. Ver versiones existentes (máx. 5 permitidas)
+aws iam list-policy-versions --policy-arn "$POLICY_ARN" --profile "$PROFILE"
+
+# 2. Construir el JSON v2 (statements existentes de 11.2 + los 2 nuevos de arriba)
+#    Guardarlo en /tmp/app-policy-v2.json
+
+# 3. Crear nueva versión y marcarla como default
+aws iam create-policy-version \
+  --policy-arn "$POLICY_ARN" \
+  --policy-document file:///tmp/app-policy-v2.json \
+  --set-as-default \
+  --profile "$PROFILE"
+```
+
+> 💡 **Si llegás al límite de 5 versiones** en algún momento, borrá la más vieja antes de crear la nueva:
+> ```bash
+> aws iam delete-policy-version --policy-arn "$POLICY_ARN" --version-id v1 --profile smart-control
+> ```
+
+#### 11.4.2 — Crear el parámetro `/smart-control/db-password`
+
+```bash
+PROFILE=smart-control
+REGION=us-east-2
+
+aws ssm put-parameter \
+  --name "/smart-control/db-password" \
+  --description "Password de Aurora PostgreSQL para Fase 1 (placeholder hasta crear RDS)" \
+  --value "REPLACE_WHEN_RDS_CREATED_$(openssl rand -hex 8)" \
+  --type "SecureString" \
+  --tier Standard \
+  --tags "Key=Project,Value=smart-control-security" \
+         "Key=Environment,Value=dev" \
+         "Key=Phase,Value=fase-1" \
+         "Key=Owner,Value=wallyribal@gmail.com" \
+         "Key=CostCenter,Value=smart-control" \
+         "Key=ManagedBy,Value=manual" \
+  --region "$REGION" \
+  --profile "$PROFILE"
+```
+
+> ⚠️ **Gotcha sintaxis de tags en SSM:** Acá los tags van como **strings separados por espacio**, formato `"Key=X,Value=Y"`. **Diferente** de CloudWatch Logs (un solo string comma-separated) y de IAM/EC2 (`Key=X Value=Y`). Sí, AWS es inconsistente. Cuando algo falle con `Unknown options`, probá las 3 sintaxis.
+
+#### 11.4.3 — Verificación end-to-end
+
+```bash
+# Leer metadata del parámetro
+aws ssm get-parameter \
+  --name "/smart-control/db-password" \
+  --region us-east-2 --profile smart-control \
+  --query 'Parameter.{Name:Name,Type:Type,Version:Version,ARN:ARN}'
+
+# Leer el value descifrado (sin mostrarlo en pantalla)
+VALUE=$(aws ssm get-parameter \
+  --name "/smart-control/db-password" \
+  --with-decryption \
+  --region us-east-2 --profile smart-control \
+  --query 'Parameter.Value' --output text)
+echo "Longitud: ${#VALUE} caracteres"
+unset VALUE
+```
+
+**Sanity check del role tras actualizar la policy:**
+
+```bash
+ROLE_ARN=arn:aws:iam::052251888904:role/smart-control-app-role
+PARAM_ARN=arn:aws:ssm:us-east-2:052251888904:parameter/smart-control/db-password
+
+for test in \
+  "ssm:GetParameter|$PARAM_ARN" \
+  "ssm:PutParameter|$PARAM_ARN" \
+  "ssm:DeleteParameter|$PARAM_ARN" \
+  "ssm:GetParameter|arn:aws:ssm:us-east-2:052251888904:parameter/otro-prefijo/x"
+do
+  ACTION="${test%|*}"; RESOURCE="${test#*|}"
+  RESULT=$(aws iam simulate-principal-policy \
+    --policy-source-arn "$ROLE_ARN" \
+    --action-names "$ACTION" \
+    --resource-arns "$RESOURCE" \
+    --profile smart-control \
+    --query 'EvaluationResults[0].EvalDecision' --output text)
+  printf "  %-30s %s\n" "$ACTION" "$RESULT"
+done
+```
+
+**Resultado esperado:**
+
+```
+ssm:GetParameter (smart-control/*)      allowed
+ssm:PutParameter                         implicitDeny  ← read-only
+ssm:DeleteParameter                      implicitDeny  ← read-only
+ssm:GetParameter (otro-prefijo)          implicitDeny  ← scoped
+```
+
+> ℹ️ **Sobre `kms:Decrypt` en la simulación:** si lo testeás directo con `simulate-principal-policy --action-names kms:Decrypt --resource-arns "*"`, vas a ver `implicitDeny`. Eso es porque la condición `kms:ViaService` no puede evaluarse sin el contexto. **En runtime real funciona** (Lambda/Amplify pasan el contexto automáticamente al llamar SSM). La prueba real es el `get-parameter --with-decryption` de arriba.
+
+#### 11.4.4 — Comandos útiles del día a día
+
+```bash
+PROFILE=smart-control
+REGION=us-east-2
+
+# Listar todos los parámetros bajo /smart-control/
+aws ssm describe-parameters \
+  --parameter-filters "Key=Name,Option=BeginsWith,Values=/smart-control/" \
+  --region $REGION --profile $PROFILE
+
+# Obtener varios parámetros de una sola llamada
+aws ssm get-parameters \
+  --names "/smart-control/db-password" "/smart-control/nextauth-secret" \
+  --with-decryption \
+  --region $REGION --profile $PROFILE
+
+# Obtener todos los parámetros bajo un path (útil para cargar todas las env vars)
+aws ssm get-parameters-by-path \
+  --path "/smart-control/" \
+  --recursive --with-decryption \
+  --region $REGION --profile $PROFILE \
+  --query 'Parameters[*].{Name:Name,Value:Value}'
+
+# Actualizar el valor (mismo comando que crear, con --overwrite)
+aws ssm put-parameter \
+  --name "/smart-control/db-password" \
+  --value "nuevo-valor" \
+  --type SecureString \
+  --overwrite \
+  --region $REGION --profile $PROFILE
+
+# Ver historial de versiones del parámetro
+aws ssm get-parameter-history \
+  --name "/smart-control/db-password" \
+  --with-decryption \
+  --region $REGION --profile $PROFILE \
+  --query 'Parameters[*].{Version:Version,LastModified:LastModifiedDate,User:LastModifiedUser}'
+
+# Borrar parámetro (¡destructivo!)
+# aws ssm delete-parameter --name "/smart-control/db-password" --region $REGION --profile $PROFILE
+```
+
+#### 11.4.5 — Parámetros recomendados para Fase 1
+
+A medida que vayan siendo necesarios, crear bajo el prefijo `/smart-control/`:
+
+| Nombre | Tipo | Origen | Estado |
+|---|---|---|---|
+| `/smart-control/db-password` | SecureString | RDS master password | ✅ Creado (placeholder) |
+| `/smart-control/db-connection-url` | SecureString | Connection string completa de Aurora | ⏳ Crear con RDS |
+| `/smart-control/nextauth-secret` | SecureString | `openssl rand -base64 32` | ⏳ Cuando deployemos |
+| `/smart-control/aws-region` | String (plain) | `us-east-2` | ⏳ Opcional |
+| `/smart-control/s3-bucket-name` | String (plain) | `smart-control-dev` | ⏳ Opcional |
+
+### 11.5 — Próximos recursos (a documentar cuando se creen)
 
 A medida que se crean, agregar subsecciones aquí:
 
-- 11.5 — Secrets Manager `smart-control/db-password` (pendiente)
-- 11.6 — RDS Aurora Serverless v2 PostgreSQL (pendiente)
+- 11.6 — RDS Aurora Serverless v2 PostgreSQL (pendiente, usar `db-password` del paso 11.4)
 - 11.7 — SES + dominios verificados (pendiente)
 - 11.8 — Amplify Hosting (pendiente)
 
-> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la política actual NO incluye RDS, SES, ni nada más allá de lo listado en 11.2 y 11.3.
+> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la versión actual (v2) incluye lo de 11.2, 11.3 y 11.4 (S3, Rekognition face, Secrets Manager, CloudWatch Logs, SSM Parameter Store, KMS via SSM).
 
 ---
 
