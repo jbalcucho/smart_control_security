@@ -23,6 +23,12 @@ service-account*.json
 firebase-adminsdk*.json
 google-services.json
 
+# AWS access keys (NUNCA commitear el CSV que descarga IAM Console)
+*accessKeys*.csv
+*_accessKeys*
+aws-credentials*
+.aws/
+
 # -----------------------------
 # Python / Backend FastAPI
 # -----------------------------
@@ -184,7 +190,14 @@ desktop.ini
 # -----------------------------
 # Cursor
 # -----------------------------
-.cursor/
+# Ignora TODO lo que haya dentro de .cursor/ (transcripts, caches, etc.).
+# Usamos .cursor/* (no .cursor/) para que git pueda descender al directorio
+# y respetar las excepciones de abajo. Los transcripts reales viven en
+# ~/.cursor/projects/, fuera del repo, así que acá solo aparecen configs.
+.cursor/*
+# Excepción: el mcp.json es configuración compartida del equipo (MCPs AWS),
+# no contiene secretos.
+!.cursor/mcp.json
 
 # -----------------------------
 # Sistema operativo

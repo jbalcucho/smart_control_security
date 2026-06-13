@@ -1,0 +1,73 @@
+{
+  "mcpServers": {
+    "aws-knowledge": {
+      "url": "https://knowledge-mcp.global.api.aws"
+    },
+    "aws-amplify": {
+      "url": "https://amplify-mcp.global.api.aws"
+    },
+    "aws-api": {
+      "command": "/usr/local/bin/uvx",
+      "args": ["awslabs.aws-api-mcp-server@latest"],
+      "env": {
+        "AWS_PROFILE": "smart-control",
+        "AWS_REGION": "us-east-2",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-pricing": {
+      "command": "/usr/local/bin/uvx",
+      "args": ["awslabs.aws-pricing-mcp-server@latest"],
+      "env": {
+        "AWS_PROFILE": "smart-control",
+        "AWS_REGION": "us-east-2",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-iam": {
+      "command": "/usr/local/bin/uvx",
+      "args": ["awslabs.iam-mcp-server@latest"],
+      "env": {
+        "AWS_PROFILE": "smart-control",
+        "AWS_REGION": "us-east-2",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-iac": {
+      "command": "/usr/local/bin/uvx",
+      "args": ["awslabs.iac-mcp-server@latest"],
+      "env": {
+        "AWS_PROFILE": "smart-control",
+        "AWS_REGION": "us-east-2",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-cloudwatch": {
+      "command": "/usr/local/bin/uvx",
+      "args": ["awslabs.cloudwatch-mcp-server@latest"],
+      "env": {
+        "AWS_PROFILE": "smart-control",
+        "AWS_REGION": "us-east-2",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-postgres": {
+      "command": "/usr/local/bin/uvx",
+      "args": ["awslabs.postgres-mcp-server@latest"],
+      "env": {
+        "AWS_PROFILE": "smart-control",
+        "AWS_REGION": "us-east-2",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-dynamodb": {
+      "command": "/usr/local/bin/uvx",
+      "args": ["awslabs.dynamodb-mcp-server@latest"],
+      "env": {
+        "AWS_PROFILE": "smart-control",
+        "AWS_REGION": "us-east-2",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    }
+  }
+}
