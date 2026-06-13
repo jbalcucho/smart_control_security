@@ -46,6 +46,7 @@ Al terminar este playbook tenés:
 | `.gitignore` blindado contra archivos de credenciales | ✅ |
 | Bucket S3 `smart-control-dev` con cifrado, versioning, lifecycle y CORS | ✅ |
 | IAM Role `smart-control-app-role` con política least-privilege para la app | ✅ |
+| CloudWatch Log Group `/smart-control/api` con retention 30 días | ✅ |
 
 **Principio rector:** least privilege, MFA en todo lo que mira a internet, budget alert como red de seguridad económica.
 
@@ -507,11 +508,11 @@ Una vez la cuenta está bootstrapeada (Pasos 1–10), arrancamos a crear los rec
 |---|---|---|---|
 | 1 | Bucket S3 `smart-control-dev` para fotos | $0 (Free Tier 12 meses) | ✅ Creado |
 | 2 | IAM Role `smart-control-app-role` + policy | $0 (IAM siempre gratis) | ✅ Creado |
-| 3 | Secrets Manager (DB password placeholder) | ~$0.40/secret | ⏳ Pendiente |
-| 4 | RDS Aurora Serverless v2 PostgreSQL | ~$45 (0.5 ACU mínimo) | ⏳ Pendiente |
-| 5 | SES (sandbox al inicio) | $0 hasta 62k emails | ⏳ Pendiente |
-| 6 | Rekognition (sin recurso, on-demand) | ~$1/1000 face-compare | ⏳ Pendiente |
-| 7 | CloudWatch Log Group `/smart-control/api` | ~$0.50/GB | ⏳ Pendiente |
+| 3 | CloudWatch Log Group `/smart-control/api` | $0 (Free Tier 5GB ingest + 5GB storage) | ✅ Creado |
+| 4 | Secrets Manager (DB password placeholder) | ~$0.40/secret | ⏳ Pendiente |
+| 5 | RDS Aurora Serverless v2 PostgreSQL | ~$45 (0.5 ACU mínimo) | ⏳ Pendiente |
+| 6 | SES (sandbox al inicio) | $0 hasta 62k emails | ⏳ Pendiente |
+| 7 | Rekognition (sin recurso, on-demand) | ~$1/1000 face-compare | ⏳ Pendiente |
 | 8 | Amplify Hosting | Variable | ⏳ Pendiente |
 
 ### 11.1 — Bucket S3 `smart-control-dev`
@@ -801,17 +802,172 @@ rekognition:CompareFaces                           allowed
 iam:CreateUser                                     implicitDeny
 ```
 
-### 11.3 — Próximos recursos (a documentar cuando se creen)
+### 11.3 — CloudWatch Log Group `/smart-control/api`
+
+Log group centralizado para todas las app logs de Fase 1 (API Next.js, Lambdas de jobs, eventos de auth). Crearlo **antes** de los componentes de compute garantiza:
+
+- Convención de naming consistente (`/smart-control/*`)
+- **Retention controlada desde día 1** (sin retention el default es "never expire" → costo creciente para siempre)
+- Lambda/Amplify lo pueden usar apenas se desplieguen (la policy `smart-control-app-policy` del paso 11.2 ya da permisos a `/smart-control/*`)
+
+**Configuración aplicada:**
+
+| Setting | Valor | Por qué |
+|---|---|---|
+| Nombre | `/smart-control/api` | Convención namespace para todos los logs de la app |
+| Retention | 30 días | Suficiente para debug y auditoría reciente, evita acumular costo |
+| Region | `us-east-2` | Misma del bucket S3 y del role |
+| Tags | Project, Environment, Phase, Owner, CostCenter, ManagedBy | Trackeo de costos |
+
+**Comandos de creación:**
+
+```bash
+PROFILE=smart-control
+REGION=us-east-2
+LOG_GROUP=/smart-control/api
+LOG_GROUP_ARN="arn:aws:logs:${REGION}:052251888904:log-group:${LOG_GROUP}"
+
+# 1. Crear el log group
+aws logs create-log-group \
+  --log-group-name "$LOG_GROUP" \
+  --region "$REGION" --profile "$PROFILE"
+
+# 2. Retention de 30 días
+aws logs put-retention-policy \
+  --log-group-name "$LOG_GROUP" \
+  --retention-in-days 30 \
+  --region "$REGION" --profile "$PROFILE"
+
+# 3. Tags (OJO con la sintaxis: comma-separated key=value en UN solo string)
+aws logs tag-resource \
+  --resource-arn "$LOG_GROUP_ARN" \
+  --tags "Project=smart-control-security,Environment=dev,Phase=fase-1,Owner=wallyribal@gmail.com,CostCenter=smart-control,ManagedBy=manual" \
+  --region "$REGION" --profile "$PROFILE"
+```
+
+> ⚠️ **Gotcha:** El comando `aws logs tag-resource` usa sintaxis **comma-separated** dentro de un solo string para `--tags`, **NO** key=value separados por espacio como otros servicios AWS. Si pasás `--tags Key1=v1 Key2=v2` falla con `Unknown options`.
+
+**Verificación end-to-end (write + read):**
+
+```bash
+# Verificar configuración del log group
+aws logs describe-log-groups \
+  --log-group-name-prefix /smart-control/api \
+  --region us-east-2 --profile smart-control \
+  --query 'logGroups[0].{Name:logGroupName,Retention:retentionInDays,StoredBytes:storedBytes}'
+
+# Test de escritura: crear stream + enviar evento
+STREAM="bootstrap-test-$(date +%Y%m%d-%H%M%S)"
+aws logs create-log-stream \
+  --log-group-name /smart-control/api \
+  --log-stream-name "$STREAM" \
+  --region us-east-2 --profile smart-control
+
+TIMESTAMP=$(date +%s)000
+aws logs put-log-events \
+  --log-group-name /smart-control/api \
+  --log-stream-name "$STREAM" \
+  --log-events "timestamp=${TIMESTAMP},message=\"Test log entry\"" \
+  --region us-east-2 --profile smart-control
+
+# Leer de vuelta el evento (sleep 2 porque CloudWatch tiene ~1s de latencia)
+sleep 2
+aws logs get-log-events \
+  --log-group-name /smart-control/api \
+  --log-stream-name "$STREAM" \
+  --region us-east-2 --profile smart-control \
+  --query 'events[*].{Timestamp:timestamp,Message:message}'
+```
+
+**Comandos útiles para operar en el día a día:**
+
+```bash
+# Listar todos los streams (orden por última actividad)
+aws logs describe-log-streams \
+  --log-group-name /smart-control/api \
+  --order-by LastEventTime --descending \
+  --region us-east-2 --profile smart-control
+
+# Buscar texto en logs (últimas 24h)
+aws logs filter-log-events \
+  --log-group-name /smart-control/api \
+  --filter-pattern "ERROR" \
+  --start-time $(( ($(date +%s) - 86400) * 1000 )) \
+  --region us-east-2 --profile smart-control
+
+# Filter pattern con campos JSON (cuando la app loggee JSON estructurado)
+aws logs filter-log-events \
+  --log-group-name /smart-control/api \
+  --filter-pattern '{ $.level = "error" && $.guardiaId = "*" }' \
+  --region us-east-2 --profile smart-control
+
+# Query estilo SQL con Logs Insights (la última hora)
+QUERY_ID=$(aws logs start-query \
+  --log-group-name /smart-control/api \
+  --start-time $(( $(date +%s) - 3600 )) \
+  --end-time $(date +%s) \
+  --query-string 'fields @timestamp, @message | sort @timestamp desc | limit 20' \
+  --region us-east-2 --profile smart-control \
+  --query 'queryId' --output text)
+
+# Esperar y obtener resultados
+sleep 5
+aws logs get-query-results --query-id "$QUERY_ID" \
+  --region us-east-2 --profile smart-control
+
+# Ejemplos de queries útiles para Insights cuando haya datos reales
+#
+# 1) Errores 5xx agrupados por endpoint:
+#    filter @message like /HTTP 5/
+#    | stats count() by endpoint
+#    | sort by count desc
+#
+# 2) Latencia p95 por endpoint:
+#    filter @message like /completed/
+#    | stats pct(latency, 95) as p95 by endpoint
+#    | sort by p95 desc
+#
+# 3) Fraudes detectados en la última hora:
+#    filter event = "fraude-detectado"
+#    | stats count() by guardiaId, motivoFraude
+#    | sort by count desc
+#
+# 4) Face Liveness con score bajo:
+#    filter event = "face-liveness-result"
+#    | filter score < 0.7
+#    | sort @timestamp desc
+#    | limit 50
+
+# Cambiar retention después (ej. bajar a 14 días o subir a 90)
+aws logs put-retention-policy \
+  --log-group-name /smart-control/api \
+  --retention-in-days 14 \
+  --region us-east-2 --profile smart-control
+
+# Borrar el log group (¡destructivo! borra todos los logs)
+# aws logs delete-log-group --log-group-name /smart-control/api \
+#   --region us-east-2 --profile smart-control
+```
+
+**Costo real esperado** para Fase 1 (50 guardias):
+
+| Concepto | Volumen estimado | Costo |
+|---|---|---|
+| Ingestion | ~500 MB - 1 GB/mes | Free (Tier cubre 5 GB) |
+| Storage | ~1 GB acumulado (30d retention) | Free (Tier cubre 5 GB) |
+| Insights queries | ~100 MB scanned/mes | Free (Tier cubre 5 GB scanned) |
+| **Total** | | **$0/mes durante 12 meses, ~$1-2/mes después** |
+
+### 11.4 — Próximos recursos (a documentar cuando se creen)
 
 A medida que se crean, agregar subsecciones aquí:
 
-- 11.4 — Secrets Manager `smart-control/db-password` (pendiente)
-- 11.5 — RDS Aurora Serverless v2 PostgreSQL (pendiente)
-- 11.6 — SES + dominios verificados (pendiente)
-- 11.7 — CloudWatch Log Group `/smart-control/api` (pendiente)
+- 11.5 — Secrets Manager `smart-control/db-password` (pendiente)
+- 11.6 — RDS Aurora Serverless v2 PostgreSQL (pendiente)
+- 11.7 — SES + dominios verificados (pendiente)
 - 11.8 — Amplify Hosting (pendiente)
 
-> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la política actual NO incluye RDS, SES, ni nada más allá de lo listado en 11.2.
+> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la política actual NO incluye RDS, SES, ni nada más allá de lo listado en 11.2 y 11.3.
 
 ---
 
