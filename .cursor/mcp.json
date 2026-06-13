@@ -1,9 +1,11 @@
 {
   "mcpServers": {
     "aws-knowledge": {
+      "type": "http",
       "url": "https://knowledge-mcp.global.api.aws"
     },
     "aws-amplify": {
+      "type": "http",
       "url": "https://amplify-mcp.global.api.aws"
     },
     "aws-api": {
