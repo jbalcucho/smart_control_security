@@ -46,9 +46,10 @@ Al terminar este playbook tenés:
 | 9 MCPs AWS configurados en `.cursor/mcp.json` | ✅ |
 | `.gitignore` blindado contra archivos de credenciales | ✅ |
 | Bucket S3 `smart-control-dev` con cifrado, versioning, lifecycle y CORS | ✅ |
-| IAM Role `smart-control-app-role` con política least-privilege para la app | ✅ |
+| IAM Role `smart-control-app-role` con política least-privilege para la app (v3 con SES) | ✅ |
 | CloudWatch Log Group `/smart-control/api` con retention 30 días | ✅ |
 | SSM Parameter Store `/smart-control/db-password` (SecureString, $0/mes) | ✅ |
+| SES Email Identity `wallyribal@gmail.com` verificada (sandbox) | ✅ |
 | Script idempotente `scripts/aws/bootstrap-fase1.sh` para replicar en staging/prod | ✅ |
 
 **Principio rector:** least privilege, MFA en todo lo que mira a internet, budget alert como red de seguridad económica.
@@ -513,10 +514,11 @@ Una vez la cuenta está bootstrapeada (Pasos 1–10), arrancamos a crear los rec
 | 2 | IAM Role `smart-control-app-role` + policy | $0 (IAM siempre gratis) | ✅ Creado |
 | 3 | CloudWatch Log Group `/smart-control/api` | $0 (Free Tier 5GB ingest + 5GB storage) | ✅ Creado |
 | 4 | SSM Parameter Store `/smart-control/db-password` | $0 (Standard tier, Free forever) | ✅ Creado |
-| 5 | RDS Aurora Serverless v2 PostgreSQL | ~$45 (0.5 ACU mínimo) | ⏳ Pendiente |
-| 6 | SES (sandbox al inicio) | $0 hasta 62k emails | ⏳ Pendiente |
+| 5 | SES Email Identity `wallyribal@gmail.com` (sandbox) | $0 (hasta 200 emails/día en sandbox) | ✅ Creado |
+| 6 | RDS Aurora Serverless v2 PostgreSQL | ~$45 (0.5 ACU mínimo) | ⏳ Pendiente |
 | 7 | Rekognition (sin recurso, on-demand) | ~$1/1000 face-compare | ⏳ Pendiente |
 | 8 | Amplify Hosting | Variable | ⏳ Pendiente |
+| 9 | SES dominio verificado + salida de sandbox | $0 hasta 62k emails/mes desde Lambda | ⏳ Pendiente (Fase 4) |
 
 ### 11.1 — Bucket S3 `smart-control-dev`
 
@@ -1166,15 +1168,257 @@ A medida que vayan siendo necesarios, crear bajo el prefijo `/smart-control/`:
 | `/smart-control/aws-region` | String (plain) | `us-east-2` | ⏳ Opcional |
 | `/smart-control/s3-bucket-name` | String (plain) | `smart-control-dev` | ⏳ Opcional |
 
-### 11.5 — Próximos recursos (a documentar cuando se creen)
+### 11.5 — SES Email Identity `wallyribal@gmail.com` (sandbox)
+
+**Para qué se usa email en el proyecto** (referencia rápida — detalle en `funcionalidades-backend.md` y `funcionalidades-admin-web.md`):
+
+| Uso | Cuándo dispara | Fase real | Necesita SES en Fase 1 |
+|---|---|---|---|
+| `alerta_fraude_supervisor` | Marca con flag de fraude (GPS, Liveness, geofence) | Fase 4 | Sí, para testing del flujo |
+| `marca_rechazada_guardia` | Foto/GPS no pasa validación | Fase 4 | Sí, idem |
+| `bienvenida_guardia` | Admin crea usuario | Fase 4 | Sí, idem |
+| `password_reset` | `POST /api/auth/forgot-password` | **Fase 1** | **Sí, bloquea login admin** |
+| `digest_alertas` | Cron configurable | Fase 4 | No por ahora |
+
+#### 11.5.1 — Decisión: SES vs SendGrid
+
+| Aspecto | AWS SES (elegido) | SendGrid |
+|---|---|---|
+| Costo (20k emails/mes) | ~$2/mes | $19.95/mes (Essentials) |
+| Auth | IAM Role nativo (sin API key que rotar) | API key en Parameter Store |
+| Setup inicial | Verificar email + ticket sandbox (24-72h) | Cuenta + API key (5 min) |
+| Deliverability transaccional | Excelente desde AWS | Excelente |
+| Integración con nuestro stack | Total (ya estamos en AWS) | Vendor adicional |
+| Templates editor visual | No (API) | Sí |
+| Volumen estimado proyecto | 5k-20k emails/mes | Mismo |
+
+**Elegimos SES** porque la consolidación AWS fue decisión explícita y para uso 100% transaccional (no marketing), el editor visual de SendGrid no aporta valor real.
+
+#### 11.5.2 — Por qué crearlo ya en Fase 1 (aunque el uso pesado sea Fase 4)
+
+1. **Sandbox por default → 24-72h para salir**: cuenta nueva AWS arranca con sandbox SES (200 emails/día, sólo a identities verificadas). Salir requiere abrir ticket a AWS Support justificando volumen y use case. Si lo descubrís en Fase 4, te frenás 3 días esperando.
+2. **Verificación de dominio toma horas/días por DNS**: cuando tengamos `scsecurity.com`, propagar DKIM + SPF + DMARC tarda hasta 24h.
+3. **`/api/auth/forgot-password` ya se necesita en Fase 1**: si el panel admin tiene login, "olvidé mi contraseña" requiere email. Sin SES funcional, ese endpoint queda deshabilitado.
+
+Por eso en Fase 1 hacemos el **setup mínimo**: identity de testing (un solo email verificado), self-send en sandbox, permisos en la policy. En Fase 4 cuando lleguemos a alertas reales, sólo queda: (a) verificar dominio, (b) ticket sandbox.
+
+#### 11.5.3 — Comandos ejecutados
+
+```bash
+REGION=us-east-2
+PROFILE=smart-control
+EMAIL=wallyribal@gmail.com
+
+# 1. Crear email identity (dispara automáticamente un mail de verificación)
+aws sesv2 create-email-identity \
+  --email-identity "$EMAIL" \
+  --tags Key=Project,Value=smart-control-security \
+         Key=Environment,Value=dev \
+         Key=Phase,Value=fase-1 \
+         Key=Owner,Value="$EMAIL" \
+         Key=CostCenter,Value=smart-control \
+         Key=ManagedBy,Value=manual \
+  --region $REGION --profile $PROFILE
+
+# 2. Revisar la casilla EMAIL y clickear el link en el mail de
+#    "Amazon Web Services – Email Address Verification Request"
+#    (remitente: no-reply-aws@amazon.com)
+
+# 3. Verificar status (debe ser True después del click)
+aws sesv2 get-email-identity \
+  --email-identity "$EMAIL" \
+  --region $REGION --profile $PROFILE \
+  --query 'VerifiedForSendingStatus' --output text
+# → True
+
+# 4. Estado de cuenta y quota (debería decir Sandbox + 200/día + 1/seg)
+aws sesv2 get-account --region $REGION --profile $PROFILE \
+  --query '{SendingEnabled:SendingEnabled,ProductionAccess:ProductionAccessEnabled,DailyQuota:SendQuota.Max24HourSend,MaxPerSecond:SendQuota.MaxSendRate}'
+```
+
+#### 11.5.4 — Actualizar `smart-control-app-policy` a v3 con permisos SES
+
+La policy v2 (de Paso 11.4) no incluye SES. Hay que agregar 2 statements:
+
+```json
+{
+  "Sid": "SESSendTransactionalEmails",
+  "Effect": "Allow",
+  "Action": [
+    "ses:SendEmail",
+    "ses:SendRawEmail",
+    "ses:SendBulkEmail",
+    "ses:SendTemplatedEmail"
+  ],
+  "Resource": [
+    "arn:aws:ses:us-east-2:052251888904:identity/*",
+    "arn:aws:ses:us-east-2:052251888904:configuration-set/*"
+  ]
+},
+{
+  "Sid": "SESReadOnlyMonitoring",
+  "Effect": "Allow",
+  "Action": [
+    "ses:GetSendQuota",
+    "ses:GetSendStatistics",
+    "ses:GetAccount",
+    "ses:ListEmailIdentities",
+    "ses:GetEmailIdentity"
+  ],
+  "Resource": "*"
+}
+```
+
+**Por qué scope a `identity/*` en lugar de wildcard total:**
+- Restringe a recursos SES de ESTA cuenta y ESTA región
+- Si alguien crea una cuenta cross-account "trampa" en SES (raro pero posible), el role NO puede mandar desde ahí
+- El simulate-principal-policy confirma que `arn:aws:ses:us-east-1:...:identity/*` (otra región) → `implicitDeny`
+
+**Comandos de actualización:**
+
+```bash
+PROFILE=smart-control
+POLICY_ARN=arn:aws:iam::052251888904:policy/smart-control-app-policy
+
+# 1. Bajar la versión default actual (v2)
+DEFAULT=$(aws iam list-policy-versions \
+  --policy-arn $POLICY_ARN --profile $PROFILE \
+  --query 'Versions[?IsDefaultVersion==`true`].VersionId' --output text)
+
+aws iam get-policy-version \
+  --policy-arn $POLICY_ARN --version-id $DEFAULT --profile $PROFILE \
+  --query 'PolicyVersion.Document' --output json > /tmp/current-policy.json
+
+# 2. Construir v3 = v2 + 2 statements SES (usar jq)
+jq '.Statement += [
+  {
+    "Sid": "SESSendTransactionalEmails",
+    "Effect": "Allow",
+    "Action": ["ses:SendEmail","ses:SendRawEmail","ses:SendBulkEmail","ses:SendTemplatedEmail"],
+    "Resource": [
+      "arn:aws:ses:us-east-2:052251888904:identity/*",
+      "arn:aws:ses:us-east-2:052251888904:configuration-set/*"
+    ]
+  },
+  {
+    "Sid": "SESReadOnlyMonitoring",
+    "Effect": "Allow",
+    "Action": ["ses:GetSendQuota","ses:GetSendStatistics","ses:GetAccount","ses:ListEmailIdentities","ses:GetEmailIdentity"],
+    "Resource": "*"
+  }
+]' /tmp/current-policy.json > /tmp/app-policy-v3.json
+
+# 3. Crear v3 y marcarla como default
+aws iam create-policy-version \
+  --policy-arn $POLICY_ARN \
+  --policy-document file:///tmp/app-policy-v3.json \
+  --set-as-default \
+  --profile $PROFILE
+
+# 4. Verificar permisos del role (debe dar 4 allowed en Send*, 4 allowed en Get*)
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::052251888904:role/smart-control-app-role \
+  --action-names ses:SendEmail ses:SendRawEmail ses:SendBulkEmail ses:SendTemplatedEmail \
+  --resource-arns arn:aws:ses:us-east-2:052251888904:identity/wallyribal@gmail.com \
+  --profile $PROFILE \
+  --query 'EvaluationResults[*].{Action:EvalActionName,Decision:EvalDecision}' --output table
+
+# 5. Negative test: cross-region debe denegar
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::052251888904:role/smart-control-app-role \
+  --action-names ses:SendEmail \
+  --resource-arns arn:aws:ses:us-east-1:052251888904:identity/wallyribal@gmail.com \
+  --profile $PROFILE \
+  --query 'EvaluationResults[*].{Action:EvalActionName,Decision:EvalDecision}' --output table
+# → implicitDeny (correcto)
+```
+
+#### 11.5.5 — Test send (self-send en sandbox)
+
+En sandbox sólo se puede mandar a/desde identities verificadas. El único caso válido inicialmente es self-send (verificado → verificado):
+
+```bash
+aws sesv2 send-email \
+  --from-email-address wallyribal@gmail.com \
+  --destination ToAddresses=wallyribal@gmail.com \
+  --content '{
+    "Simple": {
+      "Subject": { "Data": "[Smart Control] Test SES", "Charset": "UTF-8" },
+      "Body": {
+        "Text": { "Data": "Test desde AWS SES sandbox", "Charset": "UTF-8" }
+      }
+    }
+  }' \
+  --region us-east-2 --profile smart-control \
+  --query 'MessageId' --output text
+# → 010f019ec191f33e-... (MessageId, el mail llega en segundos)
+```
+
+#### 11.5.6 — Comandos útiles del día a día
+
+```bash
+# Listar identities (verificadas + pending)
+aws sesv2 list-email-identities --region us-east-2 --profile smart-control \
+  --query 'EmailIdentities[*].{Identity:IdentityName,Type:IdentityType,Verified:VerifiedForSendingStatus}'
+
+# Ver estado de UNA identity
+aws sesv2 get-email-identity \
+  --email-identity wallyribal@gmail.com \
+  --region us-east-2 --profile smart-control
+
+# Estado general de la cuenta (sandbox? sending? quota?)
+aws sesv2 get-account --region us-east-2 --profile smart-control
+
+# Quota detallada (para alertar cuando estés cerca del límite)
+aws ses get-send-quota --region us-east-2 --profile smart-control
+
+# Estadísticas de envío de las últimas 24h (delivery, bounces, complaints)
+aws ses get-send-statistics --region us-east-2 --profile smart-control
+
+# Reenviar email de verificación si el primero se perdió
+aws sesv2 create-email-identity \
+  --email-identity wallyribal@gmail.com \
+  --region us-east-2 --profile smart-control 2>/dev/null || \
+  echo "Identity ya existe — usar la consola para reenviar el verification email"
+
+# Borrar identity (destructivo)
+# aws sesv2 delete-email-identity --email-identity wallyribal@gmail.com \
+#   --region us-east-2 --profile smart-control
+```
+
+#### 11.5.7 — Próximos pasos cuando lleguemos a Fase 4 (production-ready)
+
+1. **Comprar dominio** `scsecurity.com` (o el que sea)
+2. **Verificar dominio en SES** (no email individual):
+   ```bash
+   aws sesv2 create-email-identity \
+     --email-identity scsecurity.com \
+     --region us-east-2 --profile smart-control
+   ```
+   Devuelve 3 registros CNAME (DKIM) — agregarlos al DNS del registrador.
+3. **Agregar SPF y DMARC al DNS** (TXT records) para mejorar deliverability
+4. **Verificar dominio MAIL FROM custom** (`mail.scsecurity.com`) para que los headers digan eso en vez de `amazonses.com`
+5. **Abrir ticket de soporte AWS** para sacar la cuenta del sandbox:
+   - Console → Support → Create case → "Service limit increase" → SES
+   - Justificar: use case (alertas de fraude transaccionales), volumen esperado (~20k/mes), opt-in policy
+   - Aprobación: 24-72h hábiles
+6. **Crear los 4 templates** en SES Templates API:
+   - `alerta_fraude_supervisor`
+   - `marca_rechazada_guardia`
+   - `bienvenida_guardia`
+   - `password_reset`
+7. **Setup de bounce/complaint handler**: SNS topic → Lambda que actualice tabla `email_status` y marque emails inválidos para no reenviar (protege la reputación de envío)
+8. **Configuration Set** con tracking de opens/clicks (opcional, útil para password reset)
+
+### 11.6 — Próximos recursos (a documentar cuando se creen)
 
 A medida que se crean, agregar subsecciones aquí:
 
-- 11.6 — RDS Aurora Serverless v2 PostgreSQL (pendiente, usar `db-password` del paso 11.4)
-- 11.7 — SES + dominios verificados (pendiente)
-- 11.8 — Amplify Hosting (pendiente)
+- 11.7 — RDS Aurora Serverless v2 PostgreSQL (pendiente, usar `db-password` del paso 11.4)
+- 11.8 — SES dominio verificado + salida de sandbox (pendiente, ver 11.5.7)
+- 11.9 — Amplify Hosting (pendiente)
 
-> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la versión actual (v2) incluye lo de 11.2, 11.3 y 11.4 (S3, Rekognition face, Secrets Manager, CloudWatch Logs, SSM Parameter Store, KMS via SSM). Cuando se actualice la policy, **también actualizar `scripts/aws/bootstrap-fase1.sh`** función `build_app_policy_json()` para que las próximas replicaciones a staging/prod incluyan el nuevo statement.
+> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES dominio, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la versión actual (v3) incluye lo de 11.1, 11.2, 11.3, 11.4 y 11.5 (S3, Rekognition face, Secrets Manager, CloudWatch Logs, SSM Parameter Store, KMS via SSM, SES transactional). Cuando se actualice la policy, **también actualizar `scripts/aws/bootstrap-fase1.sh`** función `build_app_policy_json()` para que las próximas replicaciones a staging/prod incluyan el nuevo statement.
 
 ---
 
@@ -1211,6 +1455,9 @@ El script ya tiene los defaults internos; estas son las variables que CAMBIAN en
 | Budget mensual | $10 | $50 | $500 |
 | Log retention | 30 días | 90 días | 365 días |
 | Email default | `wallyribal@gmail.com` | `alertas-staging@scsecurity.com` | `ops@scsecurity.com` |
+| SES sender email | `wallyribal@gmail.com` (= owner) | `alertas-staging@scsecurity.com` | `noreply@scsecurity.com` (override con `SES_SENDER_EMAIL`) |
+| SES sandbox | Sí (200/día) | Sí inicialmente | **No** (ticket sacó del sandbox) |
+| SES dominio verificado | No (email individual) | Idealmente sí | **Obligatorio** (`scsecurity.com` con DKIM+SPF+DMARC) |
 | Naming logs/params | `/smart-control/*` | `/smart-control/*` (mismo) | `/smart-control/*` (mismo) |
 | Nombre IAM role | `smart-control-app-role` | igual | igual |
 | Nombre IAM policy | `smart-control-app-policy` | igual | igual |
@@ -1278,6 +1525,10 @@ Para que monitoring, dashboards y queries funcionen igual en todos los ambientes
 □ Runbook de incidentes con on-call rotation
 □ El IAM dev user usa política custom estricta del Apéndice A (NO PowerUserAccess)
 □ Tabla de "Decisiones por ambiente" (sección 12.3) revisada y aplicada
+□ SES con dominio verificado (no email individual) + DKIM + SPF + DMARC en DNS
+□ SES fuera de sandbox (ticket aprobado por AWS Support)
+□ SES bounce/complaint handler configurado (SNS → Lambda → tabla email_status)
+□ SES sender no es @gmail.com (usar dominio propio para no caer en spam)
 ```
 
 ### 12.6 — Cuándo migrar a IaC (CDK / Terraform)
@@ -1323,6 +1574,7 @@ Ver [`scripts/aws/README.md`](../scripts/aws/README.md) para el detalle completo
     S3 Bucket:        arn:aws:s3:::smart-control-prod
     Log Group:        arn:aws:logs:us-east-2:<prod-account>:log-group:/smart-control/api
     SSM Parameter:    arn:aws:ssm:us-east-2:<prod-account>:parameter/smart-control/db-password
+    SES Identity:     arn:aws:ses:us-east-2:<prod-account>:identity/noreply@scsecurity.com
     IAM Policy:       arn:aws:iam::<prod-account>:policy/smart-control-app-policy
     IAM Role:         arn:aws:iam::<prod-account>:role/smart-control-app-role
 ```
@@ -1365,6 +1617,13 @@ git check-ignore -v test-accessKeys.csv
 
 # 7. MCPs cargan en Cursor
 # Reiniciar Cursor → Settings → MCP → ver los 9 servidores listados
+
+# 8. SES identity verificada y sending habilitado
+aws sesv2 get-email-identity \
+  --email-identity wallyribal@gmail.com \
+  --region us-east-2 --profile smart-control \
+  --query 'VerifiedForSendingStatus' --output text
+# → True
 ```
 
 ---
