@@ -261,8 +261,8 @@ EOF
 ensure_bucket() {
   log_section "2/7 S3 Bucket ($BUCKET)"
 
-  # Crear si no existe
-  if aws_cli s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+  # Crear si no existe (AWS CLI v2 emite JSON a stdout en head-bucket, suprimimos)
+  if aws_cli s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
     log_skip "Bucket ya existe"
   else
     # us-east-1 NO requiere LocationConstraint (es el default)
@@ -310,7 +310,7 @@ ensure_bucket() {
 }
 EOF
   aws_cli s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" \
-    --lifecycle-configuration "file://$TMP_DIR/lifecycle.json"
+    --lifecycle-configuration "file://$TMP_DIR/lifecycle.json" >/dev/null
 
   log_step "Aplicando CORS (localhost + amplifyapp.com)"
   cat > "$TMP_DIR/cors.json" <<'EOF'
