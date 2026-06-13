@@ -24,10 +24,11 @@
 11. [Paso 9 — Crear grupo IAM y asignar permisos](#paso-9--crear-grupo-iam-y-asignar-permisos)
 12. [Paso 10 — Configurar los MCPs de AWS en Cursor](#paso-10--configurar-los-mcps-de-aws-en-cursor)
 13. [Paso 11 — Crear primeros recursos Fase 1](#paso-11--crear-primeros-recursos-fase-1)
-14. [Verificación final](#14-verificación-final)
-15. [Operación recurrente](#15-operación-recurrente)
-16. [Troubleshooting](#16-troubleshooting)
-17. [Apéndice — Comandos útiles](#17-apéndice--comandos-útiles)
+14. [Paso 12 — Replicar en otro ambiente (staging / prod)](#paso-12--replicar-en-otro-ambiente-staging--prod)
+15. [Verificación final](#15-verificación-final)
+16. [Operación recurrente](#16-operación-recurrente)
+17. [Troubleshooting](#17-troubleshooting)
+18. [Apéndice — Comandos útiles](#18-apéndice--comandos-útiles)
 
 ---
 
@@ -48,6 +49,7 @@ Al terminar este playbook tenés:
 | IAM Role `smart-control-app-role` con política least-privilege para la app | ✅ |
 | CloudWatch Log Group `/smart-control/api` con retention 30 días | ✅ |
 | SSM Parameter Store `/smart-control/db-password` (SecureString, $0/mes) | ✅ |
+| Script idempotente `scripts/aws/bootstrap-fase1.sh` para replicar en staging/prod | ✅ |
 
 **Principio rector:** least privilege, MFA en todo lo que mira a internet, budget alert como red de seguridad económica.
 
@@ -212,7 +214,7 @@ aws-credentials*
 .aws/
 ```
 
-> 🔐 **Si por error ya commiteaste el CSV:** rotá las keys **inmediatamente** (sección 15.1) y eliminá del histórico con `git filter-repo` o BFG. **No basta con `git rm`** — quedan en el histórico para siempre.
+> 🔐 **Si por error ya commiteaste el CSV:** rotá las keys **inmediatamente** (sección 16.1) y eliminá del histórico con `git filter-repo` o BFG. **No basta con `git rm`** — quedan en el histórico para siempre.
 
 ---
 
@@ -380,7 +382,7 @@ Todos deben decir `allowed`.
 **Trade-off aceptado:** el usuario podría crear otros usuarios IAM. **Mitigaciones activas:**
 - Budget Alert de $10 limita el daño económico.
 - `.gitignore` previene leak de keys.
-- Las keys deberían rotarse cada 90 días (ver sección 15.1).
+- Las keys deberían rotarse cada 90 días (ver sección 16.1).
 
 **Cuándo migrar a estricto-mínimo:** cuando entre un segundo dev al equipo, o cuando se cree el ambiente de **staging/prod**. En ese punto vale la pena armar políticas custom por servicio (ver Apéndice A).
 
@@ -1172,11 +1174,164 @@ A medida que se crean, agregar subsecciones aquí:
 - 11.7 — SES + dominios verificados (pendiente)
 - 11.8 — Amplify Hosting (pendiente)
 
-> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la versión actual (v2) incluye lo de 11.2, 11.3 y 11.4 (S3, Rekognition face, Secrets Manager, CloudWatch Logs, SSM Parameter Store, KMS via SSM).
+> ⚠️ **Recordatorio:** cuando se agregue un recurso nuevo (RDS, SES, etc.) **actualizar también la política `smart-control-app-policy`** con los permisos correspondientes — la versión actual (v2) incluye lo de 11.2, 11.3 y 11.4 (S3, Rekognition face, Secrets Manager, CloudWatch Logs, SSM Parameter Store, KMS via SSM). Cuando se actualice la policy, **también actualizar `scripts/aws/bootstrap-fase1.sh`** función `build_app_policy_json()` para que las próximas replicaciones a staging/prod incluyan el nuevo statement.
 
 ---
 
-## 14. Verificación final
+## Paso 12 — Replicar en otro ambiente (staging / prod)
+
+Todo lo de Paso 11 está encapsulado en un script idempotente parametrizado por ambiente. Replicar en una cuenta AWS nueva (staging, prod, prod-EU, etc.) se reduce a un solo comando:
+
+```bash
+./scripts/aws/bootstrap-fase1.sh prod
+```
+
+### 12.1 — Pre-requisitos por ambiente (manual, una sola vez)
+
+Hay 4 cosas que **no se pueden scriptear** desde el dev local (requieren browser o root credentials de la cuenta destino). Hacerlas siguiendo los Pasos 1–9 del bootstrap, pero contra la cuenta del nuevo ambiente:
+
+1. **Cuenta AWS root** creada, con MFA activo y sin access keys del root (Pasos 1–2)
+2. **Usuario IAM `smart-control-dev`** creado vía Console (Paso 3) — el nombre del usuario puede ser el mismo entre cuentas
+3. **Access keys generadas** y profile AWS CLI configurado localmente con nombre `smart-control-<env>` (Pasos 4–6)
+4. **Grupo IAM `smart-control-dev-group`** creado y attached al usuario, vía CloudShell del root (Paso 9)
+
+Una vez todo eso está, el script se encarga del resto.
+
+### 12.2 — Tabla maestra de variables por ambiente
+
+El script ya tiene los defaults internos; estas son las variables que CAMBIAN entre ambientes:
+
+| Variable | Dev (actual) | Staging | Prod |
+|---|---|---|---|
+| AWS Profile CLI | `smart-control` | `smart-control-staging` | `smart-control-prod` |
+| Account ID | `052251888904` | distinto | distinto |
+| Region | `us-east-2` | `us-east-2` | configurable (`AWS_REGION=...`) |
+| Bucket S3 | `smart-control-dev` | `smart-control-staging` | `smart-control-prod` |
+| Tag `Environment` | `dev` | `staging` | `prod` |
+| Budget mensual | $10 | $50 | $500 |
+| Log retention | 30 días | 90 días | 365 días |
+| Email default | `wallyribal@gmail.com` | `alertas-staging@scsecurity.com` | `ops@scsecurity.com` |
+| Naming logs/params | `/smart-control/*` | `/smart-control/*` (mismo) | `/smart-control/*` (mismo) |
+| Nombre IAM role | `smart-control-app-role` | igual | igual |
+| Nombre IAM policy | `smart-control-app-policy` | igual | igual |
+
+Las cosas que **no cambian de nombre** entre ambientes (role, policy, log group, params) están bien así porque **cada ambiente vive en una cuenta AWS distinta** — no hay colisión. La única excepción es S3 (nombres únicos globales) que lleva env suffix.
+
+### 12.3 — Decisiones que CAMBIAN entre ambientes (más allá del nombre)
+
+Estas son decisiones de configuración que requieren ajuste explícito al pasar de dev a prod. Algunas el script ya las maneja (budget, retention); otras requieren intervención manual:
+
+| Decisión | Dev | Staging | Prod | Acción |
+|---|---|---|---|---|
+| **Lifecycle S3 fotos** | 30d → IA → Glacier → delete 365d | Igual a dev | NUNCA delete (retención legal) | Editar `ensure_bucket()` o config post-script |
+| **Versioning + Object Lock** | Versioning solo | Versioning solo | Versioning + Object Lock (inmutabilidad WORM) | Manual post-script |
+| **Block Public Access** | 4/4 capas | 4/4 + SCP nivel Organization | 4/4 + SCP + AWS Config rule | SCPs en Organization |
+| **RDS sizing** | 0.5–1 ACU Aurora Serverless | 1–2 ACU Multi-AZ | 2–8 ACU Multi-AZ + read replicas | Doc 11.6 (cuando se cree) |
+| **RDS backup retention** | 1 día | 7 días | 35 días + snapshots manuales pre-deploy | Param de CreateDBCluster |
+| **MFA del root** | Software (Authy/1Password) | Software | **Hardware (YubiKey)** | Manual en Console |
+| **IAM dev user** | `PowerUserAccess + IAMFullAccess` | igual | **Política custom estricta** (Apéndice A) | Reemplazar grupo del Paso 9 |
+| **Rotación de secrets** | Manual cada 90d | Manual cada 90d | **Automática via Secrets Manager** | Migrar `db-password` a Secrets Manager |
+| **Budget Actions** | Solo notificación | Solo notificación | **Corte automático** (IAM policy deny en threshold) | AWS Budgets Actions (no en script) |
+| **CloudTrail** | Default (90d gratis) | Trail dedicado | Trail con S3 lifecycle a Glacier | Manual post-script |
+| **GuardDuty** | Opcional ($) | Habilitar | **Obligatorio** | Manual habilitar |
+| **AWS Config** | No | Opcional | **Habilitar con conformance pack** | Manual habilitar |
+| **WAF en CloudFront/Amplify** | Default | Reglas básicas | **Reglas full + rate limiting** | Manual al crear CloudFront |
+
+### 12.4 — Convención de naming consistente entre ambientes
+
+Para que monitoring, dashboards y queries funcionen igual en todos los ambientes:
+
+| Tipo de recurso | Patrón | Ejemplos |
+|---|---|---|
+| Bucket S3 (env-suffix obligatorio) | `smart-control-<env>` | `smart-control-dev`, `smart-control-prod` |
+| Log Group CloudWatch (sin env) | `/smart-control/<componente>` | `/smart-control/api`, `/smart-control/jobs` |
+| Param SSM (sin env) | `/smart-control/<nombre>` | `/smart-control/db-password` |
+| Secret en Secrets Manager (sin env) | `smart-control/<nombre>` | `smart-control/api-keys/sendgrid` |
+| IAM Role (sin env) | `smart-control-<rol>` | `smart-control-app-role`, `smart-control-lambda-jobs-role` |
+| IAM Policy (sin env) | `smart-control-<rol>-policy` | `smart-control-app-policy` |
+| Lambda function (sin env) | `smart-control-<feature>` | `smart-control-fraude-detector` |
+| Tag Project | `smart-control-security` (constante) | — |
+| Tag Environment | `<env>` | `dev`, `staging`, `prod` |
+| Tag Owner | email del owner del ambiente | `wallyribal@gmail.com`, `ops@scsecurity.com` |
+| Tag CostCenter | `smart-control` (constante) | — |
+
+### 12.5 — Checklist pre-prod (antes de correr el script en cuenta prod)
+
+```text
+□ Cuenta AWS dedicada para prod (no compartida con dev/staging)
+□ MFA hardware (YubiKey) en root, no software
+□ Access keys del root borradas
+□ Usuario admin nominal para el día a día (no usar root)
+□ Billing Console accesible para usuarios IAM (Paso 2.3)
+□ AWS Organizations setup si vas a tener múltiples cuentas
+□ Service Control Policies (SCPs) que bloqueen acciones peligrosas en prod
+□ CloudTrail habilitado en TODAS las regiones, con bucket dedicado
+□ GuardDuty habilitado
+□ AWS Config habilitado con conformance pack (CIS/PCI/HIPAA según corresponda)
+□ Cost anomaly detection habilitado
+□ Budget de prod con alertas a múltiples emails (no un solo punto de falla)
+□ AWS Budgets Actions configurado para cortar acceso si se excede el budget
+□ Secrets Manager (en lugar de Parameter Store) para passwords que necesitan rotación
+□ WAF + Shield Standard en todo lo que mira a internet
+□ Reglas de retention legal: S3 Object Lock, CloudWatch retention extendida
+□ Plan de disaster recovery: backup cross-region, RTO/RPO definidos
+□ Runbook de incidentes con on-call rotation
+□ El IAM dev user usa política custom estricta del Apéndice A (NO PowerUserAccess)
+□ Tabla de "Decisiones por ambiente" (sección 12.3) revisada y aplicada
+```
+
+### 12.6 — Cuándo migrar a IaC (CDK / Terraform)
+
+El script `bootstrap-fase1.sh` es bueno hasta cierto punto. **Migrar a CDK** cuando:
+
+- Tengas **3+ ambientes** (dev, staging, prod, prod-EU, etc.) — replicar a mano se vuelve frágil
+- Necesites **rollbacks atómicos** — el script no rolea atrás un cambio fallido
+- Aparezcan **dependencias complejas** entre recursos (VPCs con N subnets, IAM con N roles cruzados)
+- Querés **drift detection automático** (CloudFormation lo da gratis)
+- Empieces a tener **CI/CD de infra** (PR → plan → review → apply)
+- El doc empiece a tener **>15 recursos** documentados en Paso 11
+
+**Stack tecnológico recomendado** cuando migres:
+
+| Aspecto | Recomendación |
+|---|---|
+| Lenguaje IaC | AWS CDK en Python (mismo lenguaje del backend) |
+| Estructura | `infra/aws/` con `stacks/` por dominio (storage, compute, monitoring, security) |
+| Estado | CloudFormation managed (no necesita backend separado como Terraform) |
+| CI/CD | GitHub Actions: PR → `cdk diff` → review → merge → `cdk deploy` |
+| Secrets | Mantener manuales (no commitear ARNs reales — usar Parameter Store en runtime) |
+| Testing | `cdk synth` en cada PR, snapshot tests con `assert.matchSnapshot()` |
+
+### 12.7 — Uso del script
+
+Ver [`scripts/aws/README.md`](../scripts/aws/README.md) para el detalle completo.
+
+**Comando típico:**
+
+```bash
+# Replicar todo en una cuenta nueva (después de hacer 12.1)
+./scripts/aws/bootstrap-fase1.sh prod
+```
+
+**El script imprime al final un resumen tipo:**
+
+```
+✅ Bootstrap completo para ambiente: prod
+
+  Recursos creados/actualizados:
+    Budget Alert:     smart-control-monthly-500usd ($500/mes → ops@scsecurity.com)
+    S3 Bucket:        arn:aws:s3:::smart-control-prod
+    Log Group:        arn:aws:logs:us-east-2:<prod-account>:log-group:/smart-control/api
+    SSM Parameter:    arn:aws:ssm:us-east-2:<prod-account>:parameter/smart-control/db-password
+    IAM Policy:       arn:aws:iam::<prod-account>:policy/smart-control-app-policy
+    IAM Role:         arn:aws:iam::<prod-account>:role/smart-control-app-role
+```
+
+**Re-ejecutar es seguro** (idempotente): los recursos existentes se detectan y se actualiza solo la configuración (tags, lifecycle, etc.) — los datos no se tocan. Esto sirve también como **drift detection manual**: si algo cambió en Console, el script vuelve a aplicar la config canonical del repo.
+
+---
+
+## 15. Verificación final
 
 Después de los 10 pasos, esto debe funcionar:
 
@@ -1214,9 +1369,9 @@ git check-ignore -v test-accessKeys.csv
 
 ---
 
-## 15. Operación recurrente
+## 16. Operación recurrente
 
-### 15.1 — Rotar access keys (cada 90 días)
+### 16.1 — Rotar access keys (cada 90 días)
 
 ```bash
 # Desde la CLI local con las keys actuales
@@ -1244,7 +1399,7 @@ aws iam delete-access-key --user-name "$USER" \
   --access-key-id "AKIA_VIEJA" --profile smart-control
 ```
 
-### 15.2 — Aumentar el budget cuando empieces a desplegar prod
+### 16.2 — Aumentar el budget cuando empieces a desplegar prod
 
 ```bash
 cat > /tmp/budget-update.json <<'EOF'
@@ -1266,7 +1421,7 @@ rm /tmp/budget-update.json
 
 > 💡 **Recomendación:** Renombrá el budget a `smart-control-monthly-200usd` (o creá uno nuevo) para que el nombre refleje el límite vigente.
 
-### 15.3 — Agregar un nuevo dev al equipo
+### 16.3 — Agregar un nuevo dev al equipo
 
 Si entra otro dev:
 
@@ -1279,7 +1434,7 @@ No es necesario re-asignar políticas — las hereda del grupo.
 
 ---
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 ### `An error occurred (AccessDenied) when calling X`
 
@@ -1326,7 +1481,7 @@ Reemplazá `"command": "uvx"` por `"command": "/usr/local/bin/uvx"` (o la ruta q
 ### El CSV se commiteó por accidente
 
 ```bash
-# 1. ROTAR LAS KEYS INMEDIATAMENTE (ver 15.1)
+# 1. ROTAR LAS KEYS INMEDIATAMENTE (ver 16.1)
 # 2. Eliminar del histórico
 git filter-repo --path smart-control-dev_accessKeys.csv --invert-paths
 # 3. Force-push (coordinar con equipo)
@@ -1335,7 +1490,7 @@ git push --force-with-lease
 
 ---
 
-## 17. Apéndice — Comandos útiles
+## 18. Apéndice — Comandos útiles
 
 ### A. Política IAM custom estricto-mínimo (para Fase 2 / staging / prod)
 
@@ -1417,5 +1572,7 @@ Cada recurso AWS de Fase 1 debe llevar estos tags (esto se va a automatizar con 
 - [`docs/seguridad.md`](./seguridad.md) — Modelo de amenazas y defensa en profundidad.
 - [`docs/roadmap-fases.md`](./roadmap-fases.md) — Qué recursos AWS toca crear en Fase 1 vs Fase 2.
 - [`docs/arquitectura.md`](./arquitectura.md) — Arquitectura técnica completa.
+- [`scripts/aws/bootstrap-fase1.sh`](../scripts/aws/bootstrap-fase1.sh) — Script idempotente para replicar Fase 1 en cualquier ambiente.
+- [`scripts/aws/README.md`](../scripts/aws/README.md) — Documentación del script.
 - [`.cursor/mcp.json`](../.cursor/mcp.json) — Configuración de los MCPs.
 - [`.gitignore`](../.gitignore) — Patrones de credenciales protegidos.
