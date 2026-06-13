@@ -5,8 +5,8 @@ Scripts shell para bootstrap y operación de recursos AWS de la app.
 ## bootstrap-fase1.sh
 
 Crea idempotentemente todos los recursos AWS de Fase 1 para un ambiente:
-Budget Alert, S3 Bucket, CloudWatch Log Group, SSM Parameter Store, IAM
-Policy y IAM Role.
+Budget Alert, S3 Bucket, CloudWatch Log Group, SSM Parameter Store, SES
+Email Identity, IAM Policy y IAM Role.
 
 ### Uso
 
@@ -31,6 +31,9 @@ OWNER_EMAIL=ops@mi-empresa.com ./scripts/aws/bootstrap-fase1.sh prod
 
 # Profile name override (default por env: smart-control / smart-control-staging / smart-control-prod)
 PROFILE_OVERRIDE=mi-profile-custom ./scripts/aws/bootstrap-fase1.sh prod
+
+# Sender de SES distinto al owner (ej: noreply@scsecurity.com en prod)
+SES_SENDER_EMAIL=noreply@scsecurity.com ./scripts/aws/bootstrap-fase1.sh prod
 ```
 
 ### Defaults por ambiente
@@ -60,6 +63,8 @@ Ver `docs/aws-bootstrap.md` Pasos 1–9 para el detalle.
 - Trust policy del role se actualiza si cambia (no se duplica)
 - Los `.keep` markers de S3 se sobrescriben sin problema (overwrite gratis)
 - Tags y configuraciones de bucket se aplican siempre (son PUT, no CREATE)
+- SES identity: si ya existe, no la re-crea ni borra. Loguea si está PENDING
+  para que vayas a verificar el link en el email.
 
 ### Cuándo NO usar este script
 

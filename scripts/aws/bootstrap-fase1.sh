@@ -7,6 +7,8 @@
 #   - Bucket S3 (block public access, AES256, versioning, lifecycle, CORS)
 #   - CloudWatch Log Group con retention controlada
 #   - SSM Parameter Store: /smart-control/db-password (SecureString, placeholder)
+#   - SES Email Identity (sender de testing; queda en PENDING hasta verificar
+#     el link enviado por mail)
 #   - IAM Customer-Managed Policy "smart-control-app-policy" (least-privilege)
 #   - IAM Role "smart-control-app-role" (trust: lambda + amplify)
 #   - Attach de policy → role
@@ -26,9 +28,10 @@
 #      docs/aws-bootstrap.md Pasos 1-9.
 #   3. AWS CLI configurado con el profile correspondiente (Paso 6).
 #   4. Variables de entorno opcionales:
-#        AWS_REGION       (default: us-east-2)
-#        OWNER_EMAIL      (default: wallyribal@gmail.com)
-#        SKIP_CONFIRM=1   (no pide "yes" antes de aplicar)
+#        AWS_REGION         (default: us-east-2)
+#        OWNER_EMAIL        (default por env: wallyribal@gmail.com en dev)
+#        SES_SENDER_EMAIL   (default: $OWNER_EMAIL — el email a verificar en SES)
+#        SKIP_CONFIRM=1     (no pide "yes" antes de aplicar)
 #
 # IDEMPOTENCIA:
 #   - Re-ejecutar es seguro: cada paso detecta si el recurso ya existe y
@@ -85,6 +88,7 @@ esac
 
 REGION="${AWS_REGION:-us-east-2}"
 OWNER_EMAIL="${OWNER_EMAIL:-$DEFAULT_OWNER_EMAIL}"
+SES_SENDER_EMAIL="${SES_SENDER_EMAIL:-$OWNER_EMAIL}"
 
 # Recursos
 BUCKET="smart-control-${ENV}"                  # global, lleva env (S3 names son únicos globales)
@@ -94,6 +98,9 @@ LOG_GROUP="/smart-control/api"                 # per-cuenta
 PARAM_DB_PASSWORD="/smart-control/db-password" # per-cuenta
 GROUP_NAME="smart-control-dev-group"           # solo referencia, ya debe existir
 BUDGET_NAME="smart-control-monthly-${BUDGET_USD}usd"
+# SES_SENDER_EMAIL es el sender que se verifica en SES; en sandbox SOLO se
+# puede enviar desde/hacia identities verificadas, así que esto también
+# habilita el destino.
 
 # Colors
 BLUE=$'\033[0;34m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; RED=$'\033[0;31m'; RESET=$'\033[0m'
@@ -178,6 +185,7 @@ confirm() {
     • S3 Bucket:      $BUCKET
     • Log Group:      $LOG_GROUP (retention ${LOG_RETENTION_DAYS}d)
     • SSM Parameter:  $PARAM_DB_PASSWORD
+    • SES Identity:   $SES_SENDER_EMAIL (sandbox, requiere verificar por email)
     • IAM Policy:     $POLICY_NAME
     • IAM Role:       $ROLE_NAME
 EOF
@@ -199,7 +207,7 @@ EOF
 # Step 1 — Budget Alert
 # ----------------------------------------------------------------------------
 ensure_budget() {
-  log_section "1/6 Budget Alert ($BUDGET_NAME)"
+  log_section "1/7 Budget Alert ($BUDGET_NAME)"
 
   if aws_cli budgets describe-budget \
        --account-id "$ACCOUNT_ID" \
@@ -251,7 +259,7 @@ EOF
 # Step 2 — S3 Bucket (creación + configuración completa)
 # ----------------------------------------------------------------------------
 ensure_bucket() {
-  log_section "2/6 S3 Bucket ($BUCKET)"
+  log_section "2/7 S3 Bucket ($BUCKET)"
 
   # Crear si no existe
   if aws_cli s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
@@ -345,7 +353,7 @@ EOF
 # Step 3 — CloudWatch Log Group
 # ----------------------------------------------------------------------------
 ensure_log_group() {
-  log_section "3/6 CloudWatch Log Group ($LOG_GROUP)"
+  log_section "3/7 CloudWatch Log Group ($LOG_GROUP)"
 
   if aws_cli logs describe-log-groups \
        --log-group-name-prefix "$LOG_GROUP" --region "$REGION" \
@@ -375,7 +383,7 @@ ensure_log_group() {
 # Step 4 — SSM Parameter Store (DB password placeholder)
 # ----------------------------------------------------------------------------
 ensure_db_password_param() {
-  log_section "4/6 SSM Parameter Store ($PARAM_DB_PASSWORD)"
+  log_section "4/7 SSM Parameter Store ($PARAM_DB_PASSWORD)"
 
   if aws_cli ssm get-parameter --name "$PARAM_DB_PASSWORD" --region "$REGION" >/dev/null 2>&1; then
     log_skip "Parámetro ya existe (NO se sobrescribe el value para no tocar password real)"
@@ -400,7 +408,51 @@ ensure_db_password_param() {
 }
 
 # ----------------------------------------------------------------------------
-# Step 5 — IAM Customer-Managed Policy (idempotente con versionado)
+# Step 5 — SES Email Identity (sender de testing en sandbox)
+# ----------------------------------------------------------------------------
+ensure_ses_identity() {
+  log_section "5/7 SES Email Identity ($SES_SENDER_EMAIL)"
+
+  # SES vive en regiones. La cuenta arranca en SANDBOX:
+  #   - Solo se puede enviar desde Y hacia identities verificadas
+  #   - 200 emails/día, 1 email/segundo
+  # Salir de sandbox = abrir ticket a AWS Support (24-72h). Para Fase 1
+  # alcanza con el sandbox (self-send a wallyribal@gmail.com en dev).
+
+  if aws_cli sesv2 get-email-identity \
+       --email-identity "$SES_SENDER_EMAIL" \
+       --region "$REGION" >/dev/null 2>&1; then
+    STATUS=$(aws_cli sesv2 get-email-identity \
+      --email-identity "$SES_SENDER_EMAIL" \
+      --region "$REGION" \
+      --query 'VerifiedForSendingStatus' --output text)
+    if [ "$STATUS" = "True" ]; then
+      log_skip "Identity ya existe y está VERIFICADA"
+    else
+      log_skip "Identity ya existe pero está PENDING — revisar la casilla $SES_SENDER_EMAIL y clickear el link de verificación"
+    fi
+    return 0
+  fi
+
+  aws_cli sesv2 create-email-identity \
+    --email-identity "$SES_SENDER_EMAIL" \
+    --tags Key=Project,Value=smart-control-security \
+           Key=Environment,Value="$ENV" \
+           Key=Phase,Value=fase-1 \
+           Key=Owner,Value="$OWNER_EMAIL" \
+           Key=CostCenter,Value=smart-control \
+           Key=ManagedBy,Value=manual \
+    --region "$REGION" >/dev/null
+
+  log_ok "Identity $SES_SENDER_EMAIL creada (status: PENDING)"
+  log_step "AWS envió un email a $SES_SENDER_EMAIL"
+  log_step "Clickeá el link para activar el sender antes de mandar emails reales"
+  log_step "Verificar status con:"
+  echo "         aws sesv2 get-email-identity --email-identity $SES_SENDER_EMAIL --region $REGION --profile $PROFILE --query VerifiedForSendingStatus"
+}
+
+# ----------------------------------------------------------------------------
+# Step 6 — IAM Customer-Managed Policy (idempotente con versionado)
 # ----------------------------------------------------------------------------
 build_app_policy_json() {
   cat > "$TMP_DIR/app-policy.json" <<EOF
@@ -455,6 +507,32 @@ build_app_policy_json() {
       "Action": ["kms:Decrypt"],
       "Resource": "*",
       "Condition": { "StringEquals": { "kms:ViaService": "ssm.${REGION}.amazonaws.com" } }
+    },
+    {
+      "Sid": "SESSendTransactionalEmails",
+      "Effect": "Allow",
+      "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail",
+        "ses:SendBulkEmail",
+        "ses:SendTemplatedEmail"
+      ],
+      "Resource": [
+        "arn:aws:ses:${REGION}:${ACCOUNT_ID}:identity/*",
+        "arn:aws:ses:${REGION}:${ACCOUNT_ID}:configuration-set/*"
+      ]
+    },
+    {
+      "Sid": "SESReadOnlyMonitoring",
+      "Effect": "Allow",
+      "Action": [
+        "ses:GetSendQuota",
+        "ses:GetSendStatistics",
+        "ses:GetAccount",
+        "ses:ListEmailIdentities",
+        "ses:GetEmailIdentity"
+      ],
+      "Resource": "*"
     }
   ]
 }
@@ -462,7 +540,7 @@ EOF
 }
 
 ensure_iam_policy() {
-  log_section "5/6 IAM Policy ($POLICY_NAME)"
+  log_section "6/7 IAM Policy ($POLICY_NAME)"
 
   build_app_policy_json
   POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}"
@@ -487,7 +565,7 @@ ensure_iam_policy() {
   else
     aws_cli iam create-policy \
       --policy-name "$POLICY_NAME" \
-      --description "Least-privilege para la app Smart Control Fase 1: S3, Rekognition face APIs, Secrets Manager, CloudWatch Logs, SSM Parameter Store, KMS via SSM" \
+      --description "Least-privilege para la app Smart Control Fase 1: S3, Rekognition face APIs, Secrets Manager, CloudWatch Logs, SSM Parameter Store, KMS via SSM, SES transactional" \
       --policy-document "file://$TMP_DIR/app-policy.json" \
       --tags Key=Project,Value=smart-control-security \
              Key=Environment,Value="$ENV" \
@@ -498,10 +576,10 @@ ensure_iam_policy() {
 }
 
 # ----------------------------------------------------------------------------
-# Step 6 — IAM Role + attach
+# Step 7 — IAM Role + attach
 # ----------------------------------------------------------------------------
 ensure_iam_role() {
-  log_section "6/6 IAM Role ($ROLE_NAME)"
+  log_section "7/7 IAM Role ($ROLE_NAME)"
 
   cat > "$TMP_DIR/trust-policy.json" <<'EOF'
 {
@@ -559,12 +637,16 @@ print_summary() {
     S3 Bucket:        arn:aws:s3:::$BUCKET
     Log Group:        arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:${LOG_GROUP}
     SSM Parameter:    arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter${PARAM_DB_PASSWORD}
+    SES Identity:     arn:aws:ses:${REGION}:${ACCOUNT_ID}:identity/${SES_SENDER_EMAIL}
     IAM Policy:       arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}
     IAM Role:         arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}
 
   Próximos pasos manuales:
+    - Verificar el link de SES en la casilla $SES_SENDER_EMAIL (status: PENDING
+      hasta clickearlo). Hasta ese momento NO se puede enviar emails reales.
     - Crear RDS Aurora Serverless v2 con master password = $PARAM_DB_PASSWORD
-    - Configurar SES (verificar dominio si vas a enviar emails reales)
+    - Para producción: verificar dominio propio en SES + sacar la cuenta del
+      sandbox vía ticket a AWS Support (24-72h de aprobación)
     - Desplegar app en Amplify Hosting con el role $ROLE_NAME
     - Para staging/prod: revisar tabla de "Decisiones por ambiente" en
       docs/aws-bootstrap.md (sección 12) — ajustar lifecycle, retention,
@@ -583,6 +665,7 @@ main() {
   ensure_bucket
   ensure_log_group
   ensure_db_password_param
+  ensure_ses_identity
   ensure_iam_policy
   ensure_iam_role
   print_summary
