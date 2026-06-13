@@ -1335,6 +1335,8 @@ aws iam simulate-principal-policy \
 
 #### 11.5.5 — Test send (self-send en sandbox)
 
+> ⚠️ **Gotcha esperado:** este test send **va a caer en SPAM** en Gmail/Outlook/etc. NO es bug, es el comportamiento correcto del filtro de spam. Ver 11.5.8 para la explicación completa. Para validar el test, abrí la carpeta de Spam → marcá como "No es spam" → confirmado que SES funciona.
+
 En sandbox sólo se puede mandar a/desde identities verificadas. El único caso válido inicialmente es self-send (verificado → verificado):
 
 ```bash
@@ -1409,6 +1411,51 @@ aws sesv2 create-email-identity \
    - `password_reset`
 7. **Setup de bounce/complaint handler**: SNS topic → Lambda que actualice tabla `email_status` y marque emails inválidos para no reenviar (protege la reputación de envío)
 8. **Configuration Set** con tracking de opens/clicks (opcional, útil para password reset)
+
+#### 11.5.8 — Deliverability gotcha: por qué el test send de 11.5.5 cae en SPAM (y por qué es OK)
+
+**TL;DR:** mandar emails con `From: wallyribal@gmail.com` desde servidores de AWS (no de Google) es **exactamente el patrón de phishing más común**. Gmail/Outlook lo marcan como spam correctamente. En prod no pasa porque usamos dominio propio.
+
+**Detalle técnico — las 4 razones que se combinan:**
+
+| # | Problema | Qué pasa exactamente | Cómo se arregla en prod |
+|---|---|---|---|
+| 1 | **DMARC fail (alignment)** | El email sale con `From: wallyribal@gmail.com` pero el header `Return-Path` y la firma `DKIM-Signature: d=amazonses.com` no coinciden con `gmail.com`. La política DMARC de `gmail.com` es `p=reject` y requiere alineación → falla. | Verificar dominio propio (`scsecurity.com`). DKIM se firma con `d=scsecurity.com` que matchea el `From`. |
+| 2 | **SPF fail** | El registro SPF público de `gmail.com` (que no controlamos) NO autoriza a los IPs de AWS SES (`amazonses.com`) como senders válidos para `@gmail.com`. | Idem: dominio propio donde nosotros agregamos `v=spf1 include:amazonses.com ~all` al TXT record. |
+| 3 | **Reputation cero** | El IP del sandbox de SES nunca mandó a `wallyribal@gmail.com` antes. Score automático bajo. | Después de salir de sandbox, AWS hace IP warm-up automático. Con dominio dedicado, la reputación se acumula sobre ese dominio. |
+| 4 | **Heurística "spoof obvio"** | Mandar "desde gmail.com" pero NO desde servidores de Google = patrón #1 de spear phishing. Cualquier filtro decente lo marca. | Dominio NO genérico (no gmail/hotmail/yahoo) elimina la heurística. |
+
+**Qué hacer cuando aparezca:**
+
+1. Abrir la carpeta de Spam → marcar el email como **"No es spam"** (mejora reputation futura del mensaje y del header DKIM en TU inbox).
+2. Confirmar que el `MessageId` del response coincide con el email recibido (validás que SES procesó).
+3. NO intentar "arreglar" la deliverability mientras el sender sea `@gmail.com` — es técnicamente imposible (no controlás el DNS de gmail.com).
+
+**Verificación de que el envío real funcionó (más allá de la bandeja):**
+
+```bash
+# Estadísticas de envío de las últimas 24h
+aws ses get-send-statistics --region us-east-2 --profile smart-control \
+  --query 'SendDataPoints[-5:].[Timestamp,DeliveryAttempts,Bounces,Complaints,Rejects]' \
+  --output table
+
+# Si DeliveryAttempts > 0 y Bounces == 0 → SES lo entregó al servidor destino
+# Lo que pase después (inbox vs spam) ya es decisión del receptor (Gmail/Outlook).
+```
+
+**En prod (con dominio propio) los headers van a verse así y entran a inbox directo:**
+
+```text
+From: alertas@scsecurity.com                     ← coincide con DKIM
+Return-Path: bounce@scsecurity.com               ← coincide con DKIM
+DKIM-Signature: v=1; a=rsa-sha256;
+  d=scsecurity.com;                              ← firmado por el dominio propio
+  s=amazonses; ...
+Authentication-Results: mx.google.com;
+  dkim=pass header.i=@scsecurity.com;            ← DKIM pass
+  spf=pass smtp.mailfrom=scsecurity.com;         ← SPF pass
+  dmarc=pass header.from=scsecurity.com          ← DMARC pass (alignment OK)
+```
 
 ### 11.6 — Próximos recursos (a documentar cuando se creen)
 
